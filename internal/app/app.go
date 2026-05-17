@@ -10,7 +10,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/huh"
-	"github.com/inovue/gh-repos-extension/internal/domain"
+	"github.com/inovue/gh-workspace/internal/domain"
 	"github.com/spf13/cobra"
 )
 
@@ -99,8 +99,8 @@ func (a *App) Run(args []string) int {
 
 func (a *App) command() *cobra.Command {
 	root := &cobra.Command{
-		Use:           "repos",
-		Short:         "Resolve and clone GitHub repositories",
+		Use:           "workspace",
+		Short:         "Resolve and clone repositories in a local workspace",
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}
@@ -305,7 +305,7 @@ func (a *App) checkHome() error {
 }
 
 func (a *App) repoRoot() string {
-	return filepath.Join(a.homeDir, "repos")
+	return filepath.Join(a.homeDir, "workspaces")
 }
 
 func isGitWorkingTree(path string) bool {

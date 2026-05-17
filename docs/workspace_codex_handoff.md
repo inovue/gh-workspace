@@ -1,4 +1,4 @@
-# Repository Launcher / Manager 開発引き継ぎ資料
+# Workspace Launcher 開発引き継ぎ資料
 
 ## 0. 背景
 
@@ -6,9 +6,9 @@
 
 この表現はあくまで比喩であり、真の要件は次の通り。
 
-> GitHub 上のリモートリポジトリと、ローカルに clone 済みのリポジトリを、選択式 UI で横断的に管理できる repository launcher / repository manager がほしい。
+> GitHub 上のリモートリポジトリと、ローカルに clone 済みのリポジトリを、選択式 UI で横断的に管理できる workspace launcher がほしい。
 
-既存の `gh-dash` は PR / Issue / Notification 管理には強いが、repo 管理ツールではない。`gh-q` 系 extension は一部要件に近いが、リモート/ローカル統合状態管理、clone 済み判定、editor 起動、lazygit 起動、terminal 起動、未 clone repo の clone までを一貫して扱うものではない。
+既存の `gh-dash` は PR / Issue / Notification 管理には強いが、workspace launcherではない。`gh-q` 系 extension は一部要件に近いが、リモート/ローカル統合状態管理、clone 済み判定、editor 起動、lazygit 起動、terminal 起動、未 clone repo の clone までを一貫して扱うものではない。
 
 そのため、Codex には小さな CLI/TUI ツールとして実装を依頼する。
 
@@ -16,12 +16,12 @@
 
 ## 1. 作りたいもの
 
-仮称：`gh-repos` または `repo-launcher`
+正式名：`gh-workspace`
 
-GitHub CLI extension として動作する repository launcher。
+GitHub CLI extension として動作する workspace launcher。
 
 ```bash
-gh repos
+gh workspace
 ```
 
 または standalone CLI としても動かせるようにする。
@@ -44,11 +44,11 @@ GitHub remote repositories と local repositories を統合して 1 つの選択
 例：
 
 ```text
-Repository Launcher
+Workspace Launcher
 
-> inovue3/chatbase-app        cloned   ~/ghq/github.com/inovue3/chatbase-app
+> inovue3/chatbase-app        cloned   ~/workspaces/github.com/inovue3/chatbase-app
   inovue3/agent-server        remote   not cloned
-  usememos/memos              cloned   ~/ghq/github.com/usememos/memos
+  usememos/memos              cloned   ~/workspaces/github.com/usememos/memos
   cloudflare/workers-sdk      remote   not cloned
 ```
 
@@ -74,7 +74,7 @@ q      quit
 - GitHub remote repo 一覧は `gh repo list` で見られるが、ローカル clone 済み状態と統合されない。
 - ローカル repo は `ghq list` や `find` で探せるが、GitHub 側の metadata と統合されない。
 - `fzf` の shell function でも実現できるが、設定が散らばる。
-- `gh-dash` は非常に強いが、PR / Issue / Notification が中心で、repo launcher ではない。
+- `gh-dash` は非常に強いが、PR / Issue / Notification が中心で、workspace launcher ではない。
 - `gh-q` 系は近いが、clone/open/shell/editor/lazygit/browser/status を統合する思想ではない。
 
 ### 3.2 目標
@@ -167,7 +167,7 @@ MVP では以下のルールでローカル repo を検出する。
 1. 設定ファイルの `rootDirs`
 2. `GHQ_ROOT` 環境変数
 3. `ghq root` が使えるならそれ
-4. fallback: `~/ghq`, `~/src`, `~/dev`, `~/workspace`
+4. fallback: `~/workspaces`, `~/src`, `~/dev`, `~/workspace`
 
 ただし無制限に deep scan しない。
 
@@ -231,7 +231,7 @@ const (
 
 ```yaml
 rootDirs:
-  - ~/ghq
+  - ~/workspaces
   - ~/dev
 
 owners:
@@ -240,7 +240,7 @@ owners:
 editor: zed
 terminal: $SHELL
 cloneMethod: ssh
-cloneRoot: ~/ghq/github.com
+cloneRoot: ~/workspaces/github.com
 
 commands:
   openEditor: "zed {{.LocalPath}}"
@@ -251,14 +251,9 @@ commands:
 設定ファイル候補：
 
 ```text
-~/.config/gh-repos/config.yaml
+~/.config/gh-workspace/config.yaml
 ```
 
-または gh extension 名に寄せて：
-
-```text
-~/.config/gh-repo-launcher/config.yaml
-```
 
 ---
 
@@ -334,54 +329,54 @@ q      quit
 ### 9.1 起動
 
 ```bash
-gh repos
+gh workspace
 ```
 
 ### 9.2 owner 指定
 
 ```bash
-gh repos --owner inovue3
+gh workspace --owner inovue3
 ```
 
 複数 owner：
 
 ```bash
-gh repos --owner inovue3 --owner usememos
+gh workspace --owner inovue3 --owner usememos
 ```
 
 ### 9.3 local only
 
 ```bash
-gh repos --local
+gh workspace --local
 ```
 
 ### 9.4 remote only
 
 ```bash
-gh repos --remote
+gh workspace --remote
 ```
 
 ### 9.5 cloned only
 
 ```bash
-gh repos --cloned
+gh workspace --cloned
 ```
 
 ### 9.6 直接 action
 
 ```bash
-gh repos open
+gh workspace open
 
-gh repos open --editor zed
+gh workspace open --editor zed
 
-gh repos clone
+gh workspace clone
 
-gh repos shell
+gh workspace shell
 
-gh repos browser
+gh workspace browser
 ```
 
-ただし MVP では `gh repos` の TUI だけでもよい。
+ただし MVP では `gh workspace` の TUI だけでもよい。
 
 ---
 
@@ -392,13 +387,13 @@ gh repos browser
 `cloneRoot` がある場合：
 
 ```text
-~/ghq/github.com/{owner}/{repo}
+~/workspaces/github.com/{owner}/{repo}
 ```
 
 例：
 
 ```text
-~/ghq/github.com/inovue3/chatbase-app
+~/workspaces/github.com/inovue3/chatbase-app
 ```
 
 ### 10.2 clone command
@@ -406,13 +401,13 @@ gh repos browser
 SSH：
 
 ```bash
-git clone git@github.com:owner/repo.git ~/ghq/github.com/owner/repo
+git clone git@github.com:owner/repo.git ~/workspaces/github.com/owner/repo
 ```
 
 HTTPS：
 
 ```bash
-git clone https://github.com/owner/repo.git ~/ghq/github.com/owner/repo
+git clone https://github.com/owner/repo.git ~/workspaces/github.com/owner/repo
 ```
 
 `cloneMethod` で切替。
@@ -432,7 +427,7 @@ GitHub API / `gh repo list` は毎回実行すると遅い可能性がある。
 MVP では簡易 cache を導入する。
 
 ```text
-~/.cache/gh-repos/repos.json
+~/.cache/gh-workspace/repos.json
 ```
 
 内容：
@@ -492,8 +487,8 @@ stderr を短く表示。
 
 - Go module 作成。
 - Cobra で CLI 作成。
-- `gh repos` extension として動く repository 名にする。
-- repo 名は `gh-repos` が自然。
+- `gh workspace` extension として動く repository 名にする。
+- repo 名は `gh-workspace` が自然。
 
 ### Step 2: config loader
 
@@ -553,7 +548,7 @@ MVP では simple list でよい。
 
 以下を満たせば MVP 完了。
 
-1. `gh repos` で TUI が起動する。
+1. `gh workspace` で TUI が起動する。
 2. GitHub remote repo 一覧が表示される。
 3. local clone 済み repo が表示される。
 4. remote と local が同一 repo として merge される。
@@ -662,9 +657,9 @@ C  open claude
 ## 17. 最初に作ってほしいファイル構成案
 
 ```text
-gh-repos/
+gh-workspace/
   cmd/
-    gh-repos/
+    gh-workspace/
       main.go
   internal/
     config/
@@ -696,7 +691,7 @@ gh-repos/
 ## 18. README に書くべき概要
 
 ```md
-# gh-repos
+# gh-workspace
 
 A GitHub CLI extension for browsing, cloning, and opening GitHub repositories across remote and local state.
 
@@ -709,8 +704,8 @@ It combines:
 - Clone missing repositories
 
 ```bash
-gh extension install <owner>/gh-repos
-gh repos
+gh extension install <owner>/gh-workspace
+gh workspace
 ```
 ```
 
@@ -721,12 +716,12 @@ gh repos
 以下を Codex に渡す。
 
 ```text
-この資料に沿って、GitHub CLI extension `gh-repos` を Go で実装してください。
+この資料に沿って、GitHub CLI extension `gh-workspace` を Go で実装してください。
 
 最優先は MVP です。
 
 MVP 要件：
-- `gh repos` で TUI 起動
+- `gh workspace` で TUI 起動
 - `gh repo list` から remote repo 取得
 - rootDirs から local repo scan
 - remote/local を owner/repo で merge
@@ -735,7 +730,7 @@ MVP 要件：
 - cloned repo を editor / shell / lazygit で開く
 - remote-only repo を clone
 - browser で repo URL を開く
-- config file: `~/.config/gh-repos/config.yaml`
+- config file: `~/.config/gh-workspace/config.yaml`
 
 実装は Go + Bubble Tea + Cobra を優先してください。
 小さく、保守しやすく、過剰抽象化しないでください。
@@ -750,7 +745,7 @@ MVP 要件：
 - `fzf` も必須にしない。TUI 内検索で代替する。
 - `gh` は必須。認証と GitHub API は `gh` に委譲する。
 - `gh-dash` の再実装をしない。
-- repo launcher に集中する。
+- workspace launcher に集中する。
 - 最初から多機能にしすぎない。
 - local scan は重くなりすぎないよう rootDirs を限定する。
 - private repo 情報をログに出しすぎない。

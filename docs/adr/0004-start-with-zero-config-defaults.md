@@ -1,6 +1,6 @@
 # Start with zero-config defaults
 
-`gh-repos` will start without requiring a config file. The default remote scope is the active GitHub CLI user and the default root is `~/repos`.
+`gh-workspace` will start without requiring a config file. The default remote scope is the active GitHub CLI user and the default root is `~/workspaces`.
 
 **Considered Options**
 

@@ -1,15 +1,15 @@
-# gh-repos MVP Spec
+# gh-workspace MVP Spec
 
-`gh-repos` is a small GitHub CLI extension for resolving local repository paths and cloning GitHub.com repositories into a predictable local layout.
+`gh-workspace` is a small GitHub CLI extension for resolving local repository paths and cloning GitHub.com repositories into a predictable local layout.
 
 ## Commands
 
 ```bash
-gh repos path [repository]
-gh repos clone [repository]
+gh workspace path [repository]
+gh workspace clone [repository]
 ```
 
-`gh repos` without a subcommand shows help.
+`gh workspace` without a subcommand shows help.
 
 ## Repository References
 
@@ -21,7 +21,7 @@ Explicit repository arguments may be:
 - `git@github.com:owner/repo.git`
 - `ssh://git@github.com/owner/repo.git`
 
-All accepted forms are normalized to `owner/repo` for GitHub CLI operations and to `~/repos/github.com/{owner}/{repo}` for local paths.
+All accepted forms are normalized to `owner/repo` for GitHub CLI operations and to `~/workspaces/github.com/{owner}/{repo}` for local paths.
 Host, owner, and repository path segments are lowercased during normalization.
 
 MVP rejects:
@@ -47,7 +47,7 @@ Repository name validation:
 Default root:
 
 ```text
-~/repos
+~/workspaces
 ```
 
 Implementation derives this from the current user's home directory. If the home directory cannot be determined, commands fail with stderr output, empty stdout, and a non-zero exit code.
@@ -55,7 +55,7 @@ Implementation derives this from the current user's home directory. If the home 
 Repository path:
 
 ```text
-~/repos/{host}/{owner}/{repo}
+~/workspaces/{host}/{owner}/{repo}
 ```
 
 All path identity segments are lowercase.
@@ -63,17 +63,17 @@ All path identity segments are lowercase.
 GitHub.com clone example:
 
 ```text
-~/repos/github.com/inovue3/app
+~/workspaces/github.com/inovue3/app
 ```
 
 ## Local Scan
 
-`path` scans local repositories in the host/owner/name layout under `~/repos`.
+`path` scans local repositories in the host/owner/name layout under `~/workspaces`.
 
 Scan candidates are exactly:
 
 ```text
-~/repos/*/*/*
+~/workspaces/*/*/*
 ```
 
 A local repository is a directory with either:
@@ -95,17 +95,17 @@ Scan validation:
 `path` may include non-GitHub.com hosts discovered locally, such as:
 
 ```text
-~/repos/github.company.com/team/app
+~/workspaces/github.company.com/team/app
 ```
 
 `clone` only targets GitHub.com repositories in the MVP.
 
-The MVP does not inspect `origin` remotes. Repository identity for local paths comes from the `~/repos/{host}/{owner}/{repo}` layout.
+The MVP does not inspect `origin` remotes. Repository identity for local paths comes from the `~/workspaces/{host}/{owner}/{repo}` layout.
 
 ## path
 
 ```bash
-gh repos path owner/repo
+gh workspace path owner/repo
 ```
 
 Behavior:
@@ -116,7 +116,7 @@ Behavior:
 - no side effects
 
 ```bash
-gh repos path
+gh workspace path
 ```
 
 Behavior:
@@ -130,7 +130,7 @@ Behavior:
 ## clone
 
 ```bash
-gh repos clone owner/repo
+gh workspace clone owner/repo
 ```
 
 Behavior:
@@ -145,11 +145,11 @@ Behavior:
 
 `clone` may attempt `gh repo clone` for an explicit `owner/repo` even if it is not present in the active-user repository list.
 
-When running `gh repo clone`, forward both child stdout and child stderr to parent stderr. Only `gh-repos` prints the final absolute path to stdout after a successful clone.
+When running `gh repo clone`, forward both child stdout and child stderr to parent stderr. Only `gh-workspace` prints the final absolute path to stdout after a successful clone.
 Clone protocol selection is delegated entirely to GitHub CLI configuration.
 
 ```bash
-gh repos clone
+gh workspace clone
 ```
 
 Behavior:
@@ -188,10 +188,10 @@ Commands without a repository argument require a TTY because they must open the 
 Examples:
 
 ```bash
-cd "$(gh repos path)"
-zed "$(gh repos path owner/repo)"
-code "$(gh repos clone owner/repo)"
-cd "$(gh repos clone)"
+cd "$(gh workspace path)"
+zed "$(gh workspace path owner/repo)"
+code "$(gh workspace clone owner/repo)"
+cd "$(gh workspace clone)"
 ```
 
 ## Dependencies

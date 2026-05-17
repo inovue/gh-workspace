@@ -3,7 +3,7 @@ package domain_test
 import (
 	"testing"
 
-	"github.com/inovue/gh-repos-extension/internal/domain"
+	"github.com/inovue/gh-workspace/internal/domain"
 )
 
 func TestParseGitHubReferenceAcceptsMVPForms(t *testing.T) {

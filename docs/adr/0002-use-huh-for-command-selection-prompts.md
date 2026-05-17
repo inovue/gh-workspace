@@ -1,6 +1,6 @@
 # Use Huh for command selection prompts
 
-`gh-repos` will use Go with Charmbracelet Huh for the small interactive selection prompts used by commands that need a repository choice. This avoids external tools such as `fzf`, keeps selection behavior inside the binary, and is simpler than maintaining a custom Bubble Tea model for a command-first extension.
+`gh-workspace` will use Go with Charmbracelet Huh for the small interactive selection prompts used by commands that need a repository choice. This avoids external tools such as `fzf`, keeps selection behavior inside the binary, and is simpler than maintaining a custom Bubble Tea model for a command-first extension.
 
 Huh supports configuring form output with `WithOutput`, so selection prompts can be kept on stderr while command results remain machine-readable on stdout.
 

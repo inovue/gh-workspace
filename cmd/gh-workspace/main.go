@@ -3,7 +3,7 @@ package main
 import (
 	"os"
 
-	"github.com/inovue/gh-repos-extension/internal/app"
+	"github.com/inovue/gh-workspace/internal/app"
 )
 
 func main() {

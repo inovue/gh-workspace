@@ -1,4 +1,4 @@
-module github.com/inovue/gh-repos-extension
+module github.com/inovue/gh-workspace
 
 go 1.22
 

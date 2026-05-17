@@ -10,12 +10,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/inovue/gh-repos-extension/internal/app"
+	"github.com/inovue/gh-workspace/internal/app"
 )
 
 func TestPathExplicitRepositoryPrintsExistingLocalPath(t *testing.T) {
 	home := t.TempDir()
-	repoPath := filepath.Join(home, "repos", "github.com", "inovue3", "app")
+	repoPath := filepath.Join(home, "workspaces", "github.com", "inovue3", "app")
 	mkdir(t, filepath.Join(repoPath, ".git"))
 
 	var stdout, stderr bytes.Buffer
@@ -53,7 +53,7 @@ func TestRootCommandShowsHelp(t *testing.T) {
 
 func TestPathExplicitGitHubURLIsNormalized(t *testing.T) {
 	home := t.TempDir()
-	repoPath := filepath.Join(home, "repos", "github.com", "inovue3", "app")
+	repoPath := filepath.Join(home, "workspaces", "github.com", "inovue3", "app")
 	mkdir(t, filepath.Join(repoPath, ".git"))
 
 	var stdout bytes.Buffer
@@ -69,7 +69,7 @@ func TestPathExplicitGitHubURLIsNormalized(t *testing.T) {
 
 func TestPathExplicitSSHURLIsNormalized(t *testing.T) {
 	home := t.TempDir()
-	repoPath := filepath.Join(home, "repos", "github.com", "inovue3", "app")
+	repoPath := filepath.Join(home, "workspaces", "github.com", "inovue3", "app")
 	mkdir(t, filepath.Join(repoPath, ".git"))
 
 	var stdout bytes.Buffer
@@ -117,12 +117,12 @@ func TestPathWithoutRepositoryRequiresTTY(t *testing.T) {
 
 func TestPathWithoutRepositorySelectsFromLocalScan(t *testing.T) {
 	home := t.TempDir()
-	githubPath := filepath.Join(home, "repos", "github.com", "inovue3", "app")
-	companyPath := filepath.Join(home, "repos", "github.company.com", "team", "tool")
+	githubPath := filepath.Join(home, "workspaces", "github.com", "inovue3", "app")
+	companyPath := filepath.Join(home, "workspaces", "github.company.com", "team", "tool")
 	mkdir(t, filepath.Join(githubPath, ".git"))
 	mkdir(t, filepath.Join(companyPath, ".git"))
-	mkdir(t, filepath.Join(home, "repos", "badhost", "team", "ignored", ".git"))
-	mkdir(t, filepath.Join(home, "repos", "github.company.com", "-", "dash-owner", ".git"))
+	mkdir(t, filepath.Join(home, "workspaces", "badhost", "team", "ignored", ".git"))
+	mkdir(t, filepath.Join(home, "workspaces", "github.company.com", "-", "dash-owner", ".git"))
 
 	selector := &fakeSelector{selected: "github.company.com/team/tool"}
 	var stdout bytes.Buffer
@@ -147,7 +147,7 @@ func TestPathWithoutRepositorySelectsFromLocalScan(t *testing.T) {
 
 func TestPathCancelLeavesStdoutEmpty(t *testing.T) {
 	home := t.TempDir()
-	mkdir(t, filepath.Join(home, "repos", "github.com", "inovue3", "app", ".git"))
+	mkdir(t, filepath.Join(home, "workspaces", "github.com", "inovue3", "app", ".git"))
 
 	var stdout, stderr bytes.Buffer
 	exitCode := app.New(app.Config{
@@ -171,7 +171,7 @@ func TestPathCancelLeavesStdoutEmpty(t *testing.T) {
 
 func TestCloneExplicitRepositoryUsesExistingGitRepository(t *testing.T) {
 	home := t.TempDir()
-	repoPath := filepath.Join(home, "repos", "github.com", "inovue3", "app")
+	repoPath := filepath.Join(home, "workspaces", "github.com", "inovue3", "app")
 	mkdir(t, filepath.Join(repoPath, ".git"))
 	gh := &fakeGitHub{}
 	var stdout bytes.Buffer
@@ -191,7 +191,7 @@ func TestCloneExplicitRepositoryUsesExistingGitRepository(t *testing.T) {
 
 func TestCloneExplicitRepositoryRunsGhRepoClone(t *testing.T) {
 	home := t.TempDir()
-	repoPath := filepath.Join(home, "repos", "github.com", "inovue3", "app")
+	repoPath := filepath.Join(home, "workspaces", "github.com", "inovue3", "app")
 	gh := &fakeGitHub{}
 	var stdout, stderr bytes.Buffer
 
@@ -227,14 +227,14 @@ func TestCloneFailureLeavesStdoutEmpty(t *testing.T) {
 	if got := stderr.String(); got == "" {
 		t.Fatal("stderr empty, want error")
 	}
-	if _, err := os.Stat(filepath.Join(home, "repos", "github.com", "inovue3")); err != nil {
+	if _, err := os.Stat(filepath.Join(home, "workspaces", "github.com", "inovue3")); err != nil {
 		t.Fatalf("destination parent not created: %v", err)
 	}
 }
 
 func TestCloneWithoutRepositoryListsUnclonedRepositoriesForSelection(t *testing.T) {
 	home := t.TempDir()
-	existingPath := filepath.Join(home, "repos", "github.com", "inovue3", "app")
+	existingPath := filepath.Join(home, "workspaces", "github.com", "inovue3", "app")
 	mkdir(t, filepath.Join(existingPath, ".git"))
 
 	gh := &fakeGitHub{repos: []app.RemoteRepository{
@@ -252,7 +252,7 @@ func TestCloneWithoutRepositoryListsUnclonedRepositoriesForSelection(t *testing.
 		Selector:   selector,
 	}).Run([]string{"clone"})
 
-	wantPath := filepath.Join(home, "repos", "github.com", "octo", "tool")
+	wantPath := filepath.Join(home, "workspaces", "github.com", "octo", "tool")
 	if exitCode != 0 {
 		t.Fatalf("exit code = %d", exitCode)
 	}
@@ -287,7 +287,7 @@ func TestCloneWithoutRepositoryRequiresTTY(t *testing.T) {
 
 func TestCloneFailsWhenDestinationExistsButIsNotGitRepository(t *testing.T) {
 	home := t.TempDir()
-	repoPath := filepath.Join(home, "repos", "github.com", "inovue3", "app")
+	repoPath := filepath.Join(home, "workspaces", "github.com", "inovue3", "app")
 	mkdir(t, repoPath)
 
 	var stdout, stderr bytes.Buffer
