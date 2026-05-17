@@ -40,11 +40,16 @@ _Avoid_: dashboard TUI
 An explicit repository argument that identifies a GitHub.com repository as `owner/repo` or a supported GitHub.com URL.
 _Avoid_: repo-only shorthand
 
+**GitHub CLI Extension Release**:
+The official distribution unit for **gh-workspace**, consumed by `gh extension install` and carrying installable extension artifacts.
+_Avoid_: source-only install
+
 ## Relationships
 
 - A **Workspace Launcher** supports **Workspace Switcher** workflows.
 - A **Workspace Switcher** operates on local repository paths.
 - **gh-workspace** is a **Workspace Launcher**.
+- **gh-workspace** is distributed through a **GitHub CLI Extension Release**.
 - A **Managed Root** is also a **Scan Root** by default.
 - The **Active User Scope** controls which remote repositories **gh-workspace** fetches in the MVP.
 - A **Direct Command** reuses the same repository discovery and action model.

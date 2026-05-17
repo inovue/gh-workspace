@@ -33,6 +33,12 @@ Requirements:
 - `gh` installed and authenticated
 - `git` available on your `PATH`
 
+Install a specific release:
+
+```bash
+gh extension install inovue/gh-workspace --pin v0.1.0
+```
+
 Check the extension:
 
 ```bash
@@ -150,3 +156,14 @@ gh extension install .
 ```
 
 The checkout directory must be named `gh-workspace`; GitHub CLI uses the directory name to find the extension executable.
+
+## Release
+
+Releases are published from SemVer tags:
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+The release workflow builds GitHub CLI extension binaries for macOS, Linux, and Windows using GoReleaser. If `gh extension install inovue/gh-workspace` reports that no usable release artifact was found, the release artifacts are missing or misnamed.
