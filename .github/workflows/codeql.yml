@@ -16,6 +16,7 @@ permissions:
 jobs:
   analyze:
     name: Analyze
+    if: github.event.repository.private == false
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
