@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/huh"
 	"github.com/inovue/gh-workspace/internal/domain"
 	"github.com/spf13/cobra"
@@ -349,9 +350,28 @@ func (s huhSelector) Select(title string, options []SelectionOption) (string, er
 	selectField := huh.NewSelect[string]().
 		Title(title).
 		Options(huhOptions...).
+		Filtering(true).
 		Value(&selected)
+
+	if len(options) > 10 {
+		selectField.Height(10)
+	}
+
 	err := huh.NewForm(huh.NewGroup(selectField)).
 		WithOutput(s.output).
+		WithProgramOptions(
+			tea.WithMouseCellMotion(),
+			tea.WithFilter(func(m tea.Model, msg tea.Msg) tea.Msg {
+				if mouseMsg, ok := msg.(tea.MouseMsg); ok {
+					if mouseMsg.Button == tea.MouseButtonWheelUp {
+						return tea.KeyMsg{Type: tea.KeyUp}
+					} else if mouseMsg.Button == tea.MouseButtonWheelDown {
+						return tea.KeyMsg{Type: tea.KeyDown}
+					}
+				}
+				return msg
+			}),
+		).
 		Run()
 	return selected, err
 }
