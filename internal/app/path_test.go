@@ -259,8 +259,9 @@ func TestCloneWithoutRepositoryListsUnclonedRepositoriesForSelection(t *testing.
 	if got := stdout.String(); got != wantPath+"\n" {
 		t.Fatalf("stdout = %q, want %q", got, wantPath+"\n")
 	}
-	if !reflect.DeepEqual(selector.options, []string{"octo/tool"}) {
-		t.Fatalf("options = %#v", selector.options)
+	wantOptions := []string{"__SWITCH_ORG__", "octo/tool"}
+	if !reflect.DeepEqual(selector.options, wantOptions) {
+		t.Fatalf("options = %#v, want %#v", selector.options, wantOptions)
 	}
 }
 
@@ -312,18 +313,30 @@ func mkdir(t *testing.T, path string) {
 }
 
 type fakeSelector struct {
-	selected string
-	err      error
-	options  []string
+	selected     string
+	selectedList []string
+	selectCount  int
+	err          error
+	options      []string
+	optionsList  [][]string
 }
 
 func (f *fakeSelector) Select(_ string, options []app.SelectionOption) (string, error) {
-	f.options = nil
+	var opts []string
 	for _, option := range options {
-		f.options = append(f.options, option.Value)
+		opts = append(opts, option.Value)
 	}
+	f.optionsList = append(f.optionsList, opts)
+	f.options = opts
 	if f.err != nil {
 		return "", f.err
+	}
+	if len(f.selectedList) > 0 {
+		if f.selectCount < len(f.selectedList) {
+			res := f.selectedList[f.selectCount]
+			f.selectCount++
+			return res, nil
+		}
 	}
 	if f.selected == "" {
 		return "", errors.New("cancelled")
@@ -337,10 +350,23 @@ type fakeGitHub struct {
 	cloneCalled bool
 	cloneRepo   string
 	cloneDest   string
+	listOwner   string
+	username    string
+	orgs        []string
+	orgsErr     error
 }
 
-func (f *fakeGitHub) ListRepositories() ([]app.RemoteRepository, error) {
+func (f *fakeGitHub) ListRepositories(owner string) ([]app.RemoteRepository, error) {
+	f.listOwner = owner
 	return f.repos, nil
+}
+
+func (f *fakeGitHub) ListOrganizations() (string, []string, error) {
+	username := f.username
+	if username == "" {
+		username = "Personal"
+	}
+	return username, f.orgs, f.orgsErr
 }
 
 func (f *fakeGitHub) Clone(nameWithOwner, destination string, stderr io.Writer) error {
@@ -349,4 +375,84 @@ func (f *fakeGitHub) Clone(nameWithOwner, destination string, stderr io.Writer) 
 	f.cloneDest = destination
 	_, _ = io.WriteString(stderr, "cloning output\n")
 	return f.cloneErr
+}
+
+func TestCloneWithOwnerArgumentListsOwnerRepositories(t *testing.T) {
+	home := t.TempDir()
+	gh := &fakeGitHub{repos: []app.RemoteRepository{
+		{NameWithOwner: "my-org/tool"},
+	}}
+	selector := &fakeSelector{selected: "my-org/tool"}
+	var stdout bytes.Buffer
+
+	exitCode := app.New(app.Config{
+		HomeDir:    home,
+		Stdout:     &stdout,
+		GitHub:     gh,
+		IsTerminal: true,
+		Selector:   selector,
+	}).Run([]string{"clone", "my-org"})
+
+	wantPath := filepath.Join(home, "workspaces", "github.com", "my-org", "tool")
+	if exitCode != 0 {
+		t.Fatalf("exit code = %d", exitCode)
+	}
+	if got := stdout.String(); got != wantPath+"\n" {
+		t.Fatalf("stdout = %q, want %q", got, wantPath+"\n")
+	}
+	if gh.listOwner != "my-org" {
+		t.Fatalf("listOwner = %q, want %q", gh.listOwner, "my-org")
+	}
+	wantOptions := []string{"__SWITCH_ORG__", "my-org/tool"}
+	if !reflect.DeepEqual(selector.options, wantOptions) {
+		t.Fatalf("options = %#v, want %#v", selector.options, wantOptions)
+	}
+}
+
+func TestCloneSelectsOrganizationInteractively(t *testing.T) {
+	home := t.TempDir()
+	gh := &fakeGitHub{
+		orgs: []string{"org-a", "org-b"},
+		repos: []app.RemoteRepository{
+			{NameWithOwner: "org-b/tool"},
+		},
+	}
+	selector := &fakeSelector{
+		selectedList: []string{"__SWITCH_ORG__", "org-b", "org-b/tool"},
+	}
+	var stdout bytes.Buffer
+
+	exitCode := app.New(app.Config{
+		HomeDir:    home,
+		Stdout:     &stdout,
+		GitHub:     gh,
+		IsTerminal: true,
+		Selector:   selector,
+	}).Run([]string{"clone"})
+
+	wantPath := filepath.Join(home, "workspaces", "github.com", "org-b", "tool")
+	if exitCode != 0 {
+		t.Fatalf("exit code = %d", exitCode)
+	}
+	if got := stdout.String(); got != wantPath+"\n" {
+		t.Fatalf("stdout = %q, want %q", got, wantPath+"\n")
+	}
+	if gh.listOwner != "org-b" {
+		t.Fatalf("listOwner = %q, want %q", gh.listOwner, "org-b")
+	}
+	if len(selector.optionsList) != 3 {
+		t.Fatalf("optionsList len = %d, want 3", len(selector.optionsList))
+	}
+	wantFirstList := []string{"__SWITCH_ORG__", "org-b/tool"}
+	if !reflect.DeepEqual(selector.optionsList[0], wantFirstList) {
+		t.Fatalf("optionsList[0] = %#v, want %#v", selector.optionsList[0], wantFirstList)
+	}
+	wantSecondList := []string{"", "org-a", "org-b"}
+	if !reflect.DeepEqual(selector.optionsList[1], wantSecondList) {
+		t.Fatalf("optionsList[1] = %#v, want %#v", selector.optionsList[1], wantSecondList)
+	}
+	wantThirdList := []string{"__SWITCH_ORG__", "org-b/tool"}
+	if !reflect.DeepEqual(selector.optionsList[2], wantThirdList) {
+		t.Fatalf("optionsList[2] = %#v, want %#v", selector.optionsList[2], wantThirdList)
+	}
 }

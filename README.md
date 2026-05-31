@@ -93,18 +93,20 @@ Pick from an interactive list:
 ```bash
 gh workspace path
 gh workspace clone
+gh workspace clone my-org
 ```
 
-Without an argument:
+Interactive lists:
 
 - `path` lists local repositories under `~/workspaces/*/*/*`
-- `clone` lists GitHub repositories available to your `gh` account and hides repositories already cloned
+- `clone` without argument lists repositories available to your `gh` account and hides repositories already cloned. You can also select the `🔄 Switch Owner... [<owner>]` option at the top of the list to select and list repositories from any of your organizations.
+- `clone <owner>` (e.g. `clone my-org`) lists the specified organization's or user's repositories and hides repositories already cloned.
 
 ## Commands
 
 ```bash
 gh workspace path [repository]
-gh workspace clone [repository]
+gh workspace clone [repository|owner]
 ```
 
 Repository references can be:

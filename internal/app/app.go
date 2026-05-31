@@ -25,7 +25,8 @@ type Config struct {
 }
 
 type GitHubCLI interface {
-	ListRepositories() ([]RemoteRepository, error)
+	ListRepositories(owner string) ([]RemoteRepository, error)
+	ListOrganizations() (string, []string, error)
 	Clone(nameWithOwner, destination string, stderr io.Writer) error
 }
 
@@ -35,6 +36,7 @@ type Selector interface {
 
 type RemoteRepository struct {
 	NameWithOwner string `json:"nameWithOwner"`
+	Description   string `json:"description"`
 }
 
 type SelectionOption struct {
@@ -115,7 +117,7 @@ func (a *App) command() *cobra.Command {
 		},
 	}
 	cloneCmd := &cobra.Command{
-		Use:   "clone [repository]",
+		Use:   "clone [repository|owner]",
 		Short: "Clone a repository and print its path",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
@@ -162,13 +164,23 @@ func (a *App) runClone(args []string) error {
 		return err
 	}
 	if len(args) == 0 {
-		ref, err := a.selectRemoteRepository()
+		ref, err := a.selectRemoteRepository("")
 		if err != nil {
 			return err
 		}
 		return a.clone(ref)
 	}
-	ref, err := domain.ParseGitHubReference(args[0])
+
+	input := args[0]
+	if !strings.Contains(input, "/") && !strings.Contains(input, ":") {
+		ref, err := a.selectRemoteRepository(input)
+		if err != nil {
+			return err
+		}
+		return a.clone(ref)
+	}
+
+	ref, err := domain.ParseGitHubReference(input)
 	if err != nil {
 		return err
 	}
@@ -195,11 +207,11 @@ func (a *App) clone(ref domain.RepositoryRef) error {
 	return nil
 }
 
-func (a *App) selectRemoteRepository() (domain.RepositoryRef, error) {
+func (a *App) selectRemoteRepository(org string) (domain.RepositoryRef, error) {
 	if !a.isTerminal {
 		return domain.RepositoryRef{}, fmt.Errorf("clone selection requires a TTY")
 	}
-	remoteRepos, err := a.github.ListRepositories()
+	remoteRepos, err := a.github.ListRepositories(org)
 	if err != nil {
 		return domain.RepositoryRef{}, err
 	}
@@ -214,23 +226,70 @@ func (a *App) selectRemoteRepository() (domain.RepositoryRef, error) {
 		}
 	}
 	var options []SelectionOption
+	currentOwner := org
+	if currentOwner == "" {
+		currentOwner = "Personal"
+		if len(remoteRepos) > 0 {
+			parts := strings.Split(remoteRepos[0].NameWithOwner, "/")
+			if len(parts) > 0 {
+				currentOwner = parts[0]
+			}
+		}
+	}
+	options = append(options, SelectionOption{
+		Value:       "__SWITCH_ORG__",
+		Title:       fmt.Sprintf("🔄 Switch Owner... [%s]", currentOwner),
+		Description: "",
+	})
 	for _, remote := range remoteRepos {
 		ref, err := domain.ParseGitHubReference(remote.NameWithOwner)
 		if err != nil || cloned[ref.String()] {
 			continue
 		}
-		destination := a.destinationFor(ref)
+		desc := remote.Description
+		if desc != "" {
+			desc = truncateString(desc, 40)
+		}
 		options = append(options, SelectionOption{
 			Value:       ref.String(),
-			Title:       ref.String(),
-			Description: destination,
+			Title:       ref.Name,
+			Description: desc,
 		})
 	}
 	selected, err := a.selector.Select("Clone repository", options)
 	if err != nil {
 		return domain.RepositoryRef{}, err
 	}
+	if selected == "__SWITCH_ORG__" {
+		selectedOrg, err := a.selectOrganization()
+		if err != nil {
+			return domain.RepositoryRef{}, err
+		}
+		return a.selectRemoteRepository(selectedOrg)
+	}
 	return domain.ParseGitHubReference(selected)
+}
+
+func (a *App) selectOrganization() (string, error) {
+	if !a.isTerminal {
+		return "", fmt.Errorf("organization selection requires a TTY")
+	}
+	username, orgs, err := a.github.ListOrganizations()
+	if err != nil {
+		return "", err
+	}
+	var options []SelectionOption
+	options = append(options, SelectionOption{
+		Value: "",
+		Title: fmt.Sprintf("👤 %s", username),
+	})
+	for _, o := range orgs {
+		options = append(options, SelectionOption{
+			Value: o,
+			Title: fmt.Sprintf("🏢 %s", o),
+		})
+	}
+	return a.selector.Select("Select Owner", options)
 }
 
 func (a *App) selectLocalRepository(title string, repos []LocalRepository) (LocalRepository, error) {
@@ -380,8 +439,14 @@ type ghCLI struct {
 	stderr io.Writer
 }
 
-func (g ghCLI) ListRepositories() ([]RemoteRepository, error) {
-	cmd := exec.Command("gh", "repo", "list", "--limit", "1000", "--json", "nameWithOwner")
+func (g ghCLI) ListRepositories(owner string) ([]RemoteRepository, error) {
+	var args []string
+	args = append(args, "repo", "list")
+	if owner != "" {
+		args = append(args, owner)
+	}
+	args = append(args, "--limit", "1000", "--json", "nameWithOwner,description")
+	cmd := exec.Command("gh", args...)
 	cmd.Stderr = g.stderr
 	out, err := cmd.Output()
 	if err != nil {
@@ -394,9 +459,47 @@ func (g ghCLI) ListRepositories() ([]RemoteRepository, error) {
 	return repos, nil
 }
 
+func (g ghCLI) ListOrganizations() (string, []string, error) {
+	cmd := exec.Command("gh", "api", "graphql", "-f", "query=query { viewer { login organizations(first: 100) { nodes { login } } } }")
+	cmd.Stderr = g.stderr
+	out, err := cmd.Output()
+	if err != nil {
+		return "", nil, err
+	}
+	var res struct {
+		Data struct {
+			Viewer struct {
+				Login         string `json:"login"`
+				Organizations struct {
+					Nodes []struct {
+						Login string `json:"login"`
+					} `json:"nodes"`
+				} `json:"organizations"`
+			} `json:"viewer"`
+		} `json:"data"`
+	}
+	if err := domain.DecodeJSON(out, &res); err != nil {
+		return "", nil, err
+	}
+	username := res.Data.Viewer.Login
+	var names []string
+	for _, o := range res.Data.Viewer.Organizations.Nodes {
+		names = append(names, o.Login)
+	}
+	return username, names, nil
+}
+
 func (g ghCLI) Clone(nameWithOwner, destination string, stderr io.Writer) error {
 	cmd := exec.Command("gh", "repo", "clone", nameWithOwner, destination)
 	cmd.Stdout = stderr
 	cmd.Stderr = stderr
 	return cmd.Run()
+}
+
+func truncateString(s string, max int) string {
+	runes := []rune(s)
+	if len(runes) <= max {
+		return s
+	}
+	return string(runes[:max]) + "..."
 }
