@@ -28,6 +28,7 @@ type GitHubCLI interface {
 	ListRepositories(owner string) ([]RemoteRepository, error)
 	ListOrganizations() (string, []string, error)
 	Clone(nameWithOwner, destination string, stderr io.Writer) error
+	CurrentUsername() (string, error)
 }
 
 type Selector interface {
@@ -296,15 +297,24 @@ func (a *App) selectLocalRepository(title string, repos []LocalRepository) (Loca
 	if !a.isTerminal {
 		return LocalRepository{}, fmt.Errorf("path selection requires a TTY")
 	}
+	username, _ := a.github.CurrentUsername()
 	var options []SelectionOption
 	byValue := map[string]LocalRepository{}
 	for _, repo := range repos {
 		value := repo.Host + "/" + repo.Owner + "/" + repo.Name
 		byValue[value] = repo
+
+		emoji := "🏢"
+		if username != "" && strings.EqualFold(repo.Owner, username) {
+			emoji = "👤"
+		}
+
+		desc := readGitDescription(repo.Path)
+
 		options = append(options, SelectionOption{
 			Value:       value,
-			Title:       repo.Owner + "/" + repo.Name,
-			Description: repo.Host + " " + repo.Path,
+			Title:       fmt.Sprintf("%s %s/%s", emoji, repo.Owner, repo.Name),
+			Description: desc,
 		})
 	}
 	selected, err := a.selector.Select(title, options)
@@ -496,10 +506,56 @@ func (g ghCLI) Clone(nameWithOwner, destination string, stderr io.Writer) error 
 	return cmd.Run()
 }
 
+func (g ghCLI) CurrentUsername() (string, error) {
+	cmd := exec.Command("gh", "config", "get", "-h", "github.com", "user")
+	out, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
 func truncateString(s string, max int) string {
 	runes := []rune(s)
 	if len(runes) <= max {
 		return s
 	}
 	return string(runes[:max]) + "..."
+}
+
+func readGitDescription(repoPath string) string {
+	gitPath := filepath.Join(repoPath, ".git")
+	info, err := os.Stat(gitPath)
+	if err != nil {
+		return ""
+	}
+
+	var descPath string
+	if info.IsDir() {
+		descPath = filepath.Join(gitPath, "description")
+	} else {
+		content, err := os.ReadFile(gitPath)
+		if err == nil {
+			line := strings.TrimSpace(string(content))
+			if strings.HasPrefix(line, "gitdir: ") {
+				realGitDir := strings.TrimPrefix(line, "gitdir: ")
+				if !filepath.IsAbs(realGitDir) {
+					realGitDir = filepath.Join(repoPath, realGitDir)
+				}
+				descPath = filepath.Join(realGitDir, "description")
+			}
+		}
+	}
+	if descPath == "" {
+		return ""
+	}
+	data, err := os.ReadFile(descPath)
+	if err != nil {
+		return ""
+	}
+	s := strings.TrimSpace(string(data))
+	if s != "" && !strings.HasPrefix(s, "Unnamed repository") {
+		return s
+	}
+	return ""
 }

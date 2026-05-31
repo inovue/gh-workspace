@@ -145,6 +145,58 @@ func TestPathWithoutRepositorySelectsFromLocalScan(t *testing.T) {
 	}
 }
 
+func TestPathSelectionOptionFormatting(t *testing.T) {
+	home := t.TempDir()
+	personalPath := filepath.Join(home, "workspaces", "github.com", "myuser", "my-repo")
+	orgPath := filepath.Join(home, "workspaces", "github.com", "my-org", "org-repo")
+
+	mkdir(t, filepath.Join(personalPath, ".git"))
+	mkdir(t, filepath.Join(orgPath, ".git"))
+
+	// Set a custom description for personalPath
+	customDesc := "My custom repository description"
+	err := os.WriteFile(filepath.Join(personalPath, ".git", "description"), []byte(customDesc), 0644)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	selector := &fakeSelector{selected: "github.com/myuser/my-repo"}
+	gh := &fakeGitHub{username: "myuser"}
+
+	exitCode := app.New(app.Config{
+		HomeDir:    home,
+		IsTerminal: true,
+		Selector:   selector,
+		GitHub:     gh,
+	}).Run([]string{"path"})
+
+	if exitCode != 0 {
+		t.Fatalf("exit code = %d", exitCode)
+	}
+
+	if len(selector.fullOptions) != 2 {
+		t.Fatalf("len(fullOptions) = %d, want 2", len(selector.fullOptions))
+	}
+
+	// First option is my-org/org-repo (organization)
+	opt0 := selector.fullOptions[0]
+	if opt0.Title != "🏢 my-org/org-repo" {
+		t.Errorf("opt0.Title = %q, want %q", opt0.Title, "🏢 my-org/org-repo")
+	}
+	if opt0.Description != "" {
+		t.Errorf("opt0.Description = %q, want empty", opt0.Description)
+	}
+
+	// Second option is myuser/my-repo (personal)
+	opt1 := selector.fullOptions[1]
+	if opt1.Title != "👤 myuser/my-repo" {
+		t.Errorf("opt1.Title = %q, want %q", opt1.Title, "👤 myuser/my-repo")
+	}
+	if opt1.Description != customDesc {
+		t.Errorf("opt1.Description = %q, want %q", opt1.Description, customDesc)
+	}
+}
+
 func TestPathCancelLeavesStdoutEmpty(t *testing.T) {
 	home := t.TempDir()
 	mkdir(t, filepath.Join(home, "workspaces", "github.com", "inovue3", "app", ".git"))
@@ -319,9 +371,11 @@ type fakeSelector struct {
 	err          error
 	options      []string
 	optionsList  [][]string
+	fullOptions  []app.SelectionOption
 }
 
 func (f *fakeSelector) Select(_ string, options []app.SelectionOption) (string, error) {
+	f.fullOptions = options
 	var opts []string
 	for _, option := range options {
 		opts = append(opts, option.Value)
@@ -367,6 +421,10 @@ func (f *fakeGitHub) ListOrganizations() (string, []string, error) {
 		username = "Personal"
 	}
 	return username, f.orgs, f.orgsErr
+}
+
+func (f *fakeGitHub) CurrentUsername() (string, error) {
+	return f.username, nil
 }
 
 func (f *fakeGitHub) Clone(nameWithOwner, destination string, stderr io.Writer) error {
