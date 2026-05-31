@@ -3,15 +3,19 @@ package app
 import (
 	"fmt"
 	"io"
+	"math/rand"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/huh"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/inovue/gh-workspace/internal/domain"
+	"github.com/muesli/termenv"
 	"github.com/spf13/cobra"
 )
 
@@ -44,6 +48,7 @@ type SelectionOption struct {
 	Value       string
 	Title       string
 	Description string
+	Disabled    bool
 }
 
 type App struct {
@@ -77,6 +82,10 @@ func New(config Config) *App {
 	github := config.GitHub
 	if github == nil {
 		github = ghCLI{stderr: stderr}
+	}
+	if config.IsTerminal {
+		profile := termenv.NewOutput(stderr).ColorProfile()
+		lipgloss.SetColorProfile(profile)
 	}
 	return &App{
 		homeDir:    home,
@@ -125,8 +134,47 @@ func (a *App) command() *cobra.Command {
 			return a.runClone(args)
 		},
 	}
-	root.AddCommand(pathCmd, cloneCmd)
+	monkeyCmd := &cobra.Command{
+		Use:    "monkey",
+		Short:  "Run an animated monkey test of the selection UI",
+		Hidden: true,
+		RunE: func(_ *cobra.Command, _ []string) error {
+			return a.runMonkey()
+		},
+	}
+	root.AddCommand(pathCmd, cloneCmd, monkeyCmd)
 	return root
+}
+
+func (a *App) runMonkey() error {
+	if !a.isTerminal {
+		return fmt.Errorf("monkey test requires a TTY")
+	}
+
+	var options []SelectionOption
+	for i := 1; i <= 15; i++ {
+		isCloned := i%3 == 0
+		title := fmt.Sprintf("monkey-org/repo-%02d", i)
+		desc := filepath.Join(a.repoRoot(), "github.com", "monkey-org", fmt.Sprintf("repo-%02d", i))
+		if isCloned {
+			title = lipgloss.NewStyle().Foreground(lipgloss.Color("244")).Render(title + " (already cloned)")
+			desc = lipgloss.NewStyle().Foreground(lipgloss.Color("244")).Render(desc)
+		}
+		options = append(options, SelectionOption{
+			Value:       fmt.Sprintf("monkey-org/repo-%02d", i),
+			Title:       title,
+			Description: desc,
+			Disabled:    isCloned,
+		})
+	}
+
+	selector := huhSelector{output: a.stderr, isMonkey: true}
+	selected, err := selector.Select("Monkey Test Select", options)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintln(a.stdout, "Selected:", selected)
+	return nil
 }
 
 func (a *App) runPath(args []string) error {
@@ -244,18 +292,30 @@ func (a *App) selectRemoteRepository(org string) (domain.RepositoryRef, error) {
 	})
 	for _, remote := range remoteRepos {
 		ref, err := domain.ParseGitHubReference(remote.NameWithOwner)
-		if err != nil || cloned[ref.String()] {
+		if err != nil {
 			continue
 		}
+		isCloned := cloned[ref.String()]
 		desc := remote.Description
 		if desc != "" {
 			desc = truncateString(desc, 40)
 		}
+		title := ref.Name
+		if isCloned {
+			title = lipgloss.NewStyle().Foreground(lipgloss.Color("244")).Render(title + " (already cloned)")
+			if desc != "" {
+				desc = lipgloss.NewStyle().Foreground(lipgloss.Color("244")).Render(desc)
+			}
+		}
 		options = append(options, SelectionOption{
 			Value:       ref.String(),
-			Title:       ref.Name,
+			Title:       title,
 			Description: desc,
+			Disabled:    isCloned,
 		})
+	}
+	if len(options) == 0 {
+		return domain.RepositoryRef{}, fmt.Errorf("no remote repositories available to clone")
 	}
 	selected, err := a.selector.Select("Clone repository", options)
 	if err != nil {
@@ -403,7 +463,8 @@ func homeDir() (string, error) {
 }
 
 type huhSelector struct {
-	output io.Writer
+	output   io.Writer
+	isMonkey bool
 }
 
 func (s huhSelector) Select(title string, options []SelectionOption) (string, error) {
@@ -416,17 +477,45 @@ func (s huhSelector) Select(title string, options []SelectionOption) (string, er
 		huhOptions = append(huhOptions, huh.NewOption(title, option.Value))
 	}
 	var selected string
+	for _, option := range options {
+		if !option.Disabled {
+			selected = option.Value
+			break
+		}
+	}
+
+	disabledValues := make(map[string]bool)
+	for _, option := range options {
+		if option.Disabled {
+			disabledValues[option.Value] = true
+		}
+	}
+
 	selectField := huh.NewSelect[string]().
 		Title(title).
 		Options(huhOptions...).
 		Filtering(true).
-		Value(&selected)
+		Value(&selected).
+		Validate(func(val string) error {
+			if disabledValues[val] {
+				return fmt.Errorf("repository is already cloned")
+			}
+			return nil
+		})
 
 	if len(options) > 10 {
 		selectField.Height(10)
 	}
 
-	err := huh.NewForm(huh.NewGroup(selectField)).
+	wrappedSelect := &skippingSelect{
+		Select:   selectField,
+		disabled: disabledValues,
+		options:  options,
+		isMonkey: s.isMonkey,
+		rng:      rand.New(rand.NewSource(time.Now().UnixNano())),
+	}
+
+	err := huh.NewForm(huh.NewGroup(wrappedSelect)).
 		WithOutput(s.output).
 		WithProgramOptions(
 			tea.WithMouseCellMotion(),
@@ -443,6 +532,133 @@ func (s huhSelector) Select(title string, options []SelectionOption) (string, er
 		).
 		Run()
 	return selected, err
+}
+
+type skippingSelect struct {
+	*huh.Select[string]
+	disabled    map[string]bool
+	options     []SelectionOption
+	isMonkey    bool
+	monkeySteps int
+	rng         *rand.Rand
+}
+
+type monkeyMsg struct{}
+
+func monkeyTick() tea.Cmd {
+	return tea.Tick(100*time.Millisecond, func(t time.Time) tea.Msg {
+		return monkeyMsg{}
+	})
+}
+
+func (s *skippingSelect) Init() tea.Cmd {
+	if s.isMonkey {
+		return monkeyTick()
+	}
+	return s.Select.Init()
+}
+
+func (s *skippingSelect) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if _, ok := msg.(monkeyMsg); ok {
+		randomKey := s.generateRandomKey()
+		m, cmd := s.Update(randomKey)
+		if s.monkeySteps > 50 {
+			return m, cmd
+		}
+		return m, tea.Batch(cmd, monkeyTick())
+	}
+
+	hasEnabled := false
+	for _, opt := range s.options {
+		if !s.disabled[opt.Value] {
+			hasEnabled = true
+			break
+		}
+	}
+
+	newSelectModel, cmd := s.Select.Update(msg)
+	s.Select = newSelectModel.(*huh.Select[string])
+
+	isNavigation := false
+	if keyMsg, ok := msg.(tea.KeyMsg); ok {
+		switch keyMsg.Type {
+		case tea.KeyUp, tea.KeyDown, tea.KeyLeft, tea.KeyRight, tea.KeyCtrlN, tea.KeyCtrlP:
+			isNavigation = true
+		case tea.KeyRunes:
+			runes := string(keyMsg.Runes)
+			if (runes == "j" || runes == "k" || runes == "h" || runes == "l") && !s.GetFiltering() {
+				isNavigation = true
+			}
+		}
+	}
+
+	if hasEnabled && isNavigation {
+		for i := 0; i < len(s.options); i++ {
+			hovered, ok := s.Hovered()
+			if !ok || !s.disabled[hovered] {
+				break
+			}
+			newSelectModel, _ = s.Select.Update(msg)
+			s.Select = newSelectModel.(*huh.Select[string])
+		}
+	}
+
+	return s, cmd
+}
+
+func (s *skippingSelect) generateRandomKey() tea.Msg {
+	s.monkeySteps++
+	if s.monkeySteps > 50 {
+		return tea.KeyMsg{Type: tea.KeyEnter}
+	}
+
+	r := s.rng.Float64()
+	if r < 0.05 {
+		runes := []rune("abcdefghijklmnopqrstuvwxyz")
+		char := runes[s.rng.Intn(len(runes))]
+		return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{char}}
+	} else if r < 0.10 {
+		return tea.KeyMsg{Type: tea.KeyBackspace}
+	} else if r < 0.70 {
+		return tea.KeyMsg{Type: tea.KeyDown}
+	} else if r < 0.90 {
+		return tea.KeyMsg{Type: tea.KeyUp}
+	} else {
+		if s.rng.Float64() < 0.5 {
+			return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}}
+		}
+		return tea.KeyMsg{Type: tea.KeyEsc}
+	}
+}
+
+func (s *skippingSelect) WithTheme(theme *huh.Theme) huh.Field {
+	s.Select = s.Select.WithTheme(theme).(*huh.Select[string])
+	return s
+}
+
+func (s *skippingSelect) WithKeyMap(keymap *huh.KeyMap) huh.Field {
+	s.Select = s.Select.WithKeyMap(keymap).(*huh.Select[string])
+	return s
+}
+
+func (s *skippingSelect) WithWidth(width int) huh.Field {
+	s.Select = s.Select.WithWidth(width).(*huh.Select[string])
+	return s
+}
+
+func (s *skippingSelect) WithHeight(height int) huh.Field {
+	s.Select = s.Select.WithHeight(height).(*huh.Select[string])
+	return s
+}
+
+func (s *skippingSelect) WithPosition(position huh.FieldPosition) huh.Field {
+	s.Select = s.Select.WithPosition(position).(*huh.Select[string])
+	return s
+}
+
+func (s *skippingSelect) WithAccessible(accessible bool) huh.Field {
+	s.Select = s.Select.WithAccessible(accessible).(*huh.Select[string])
+	return s
 }
 
 type ghCLI struct {

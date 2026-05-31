@@ -311,9 +311,20 @@ func TestCloneWithoutRepositoryListsUnclonedRepositoriesForSelection(t *testing.
 	if got := stdout.String(); got != wantPath+"\n" {
 		t.Fatalf("stdout = %q, want %q", got, wantPath+"\n")
 	}
-	wantOptions := []string{"__SWITCH_ORG__", "octo/tool"}
-	if !reflect.DeepEqual(selector.options, wantOptions) {
-		t.Fatalf("options = %#v, want %#v", selector.options, wantOptions)
+	wantFullOptions := []app.SelectionOption{
+		{Value: "__SWITCH_ORG__", Disabled: false},
+		{Value: "inovue3/app", Disabled: true},
+		{Value: "octo/tool", Disabled: false},
+	}
+	if len(selector.fullOptions) != len(wantFullOptions) {
+		t.Fatalf("options len = %d, want %d", len(selector.fullOptions), len(wantFullOptions))
+	}
+	for i, want := range wantFullOptions {
+		got := selector.fullOptions[i]
+		if got.Value != want.Value || got.Disabled != want.Disabled {
+			t.Fatalf("option[%d] = {Value: %q, Disabled: %t}, want {Value: %q, Disabled: %t}",
+				i, got.Value, got.Disabled, want.Value, want.Disabled)
+		}
 	}
 }
 
