@@ -151,6 +151,9 @@ func TestSkippingSelectFilterNoFreeze(t *testing.T) {
 		options:  options,
 	}
 
+	// Focus the select component
+	wrapped.Focus()
+
 	// Send a character rune key (simulate typing to filter)
 	charKey := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}}
 
