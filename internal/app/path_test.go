@@ -3,8 +3,10 @@ package app_test
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -383,6 +385,10 @@ type fakeSelector struct {
 	options      []string
 	optionsList  [][]string
 	fullOptions  []app.SelectionOption
+	inputValue   string
+	inputValues  []string
+	inputCount   int
+	inputErr     error
 }
 
 func (f *fakeSelector) Select(_ string, options []app.SelectionOption) (string, error) {
@@ -409,16 +415,42 @@ func (f *fakeSelector) Select(_ string, options []app.SelectionOption) (string, 
 	return f.selected, nil
 }
 
+func (f *fakeSelector) Input(_ string, value *string, validate func(string) error) error {
+	if f.inputErr != nil {
+		return f.inputErr
+	}
+	val := f.inputValue
+	if len(f.inputValues) > 0 && f.inputCount < len(f.inputValues) {
+		val = f.inputValues[f.inputCount]
+		f.inputCount++
+	}
+	*value = val
+	if validate != nil {
+		if err := validate(val); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 type fakeGitHub struct {
-	repos       []app.RemoteRepository
-	cloneErr    error
-	cloneCalled bool
-	cloneRepo   string
-	cloneDest   string
-	listOwner   string
-	username    string
-	orgs        []string
-	orgsErr     error
+	repos             []app.RemoteRepository
+	cloneErr          error
+	cloneCalled       bool
+	cloneRepo         string
+	cloneDest         string
+	listOwner         string
+	username          string
+	orgs              []string
+	orgsErr           error
+	protocol          string
+	protocolErr       error
+	createOwner       string
+	createName        string
+	createVisibility  string
+	createDesc        string
+	createErr         error
+	remoteURL         string
 }
 
 func (f *fakeGitHub) ListRepositories(owner string) ([]app.RemoteRepository, error) {
@@ -438,12 +470,37 @@ func (f *fakeGitHub) CurrentUsername() (string, error) {
 	return f.username, nil
 }
 
+func (f *fakeGitHub) GetGitProtocol() (string, error) {
+	if f.protocolErr != nil {
+		return "", f.protocolErr
+	}
+	if f.protocol == "" {
+		return "https", nil
+	}
+	return f.protocol, nil
+}
+
 func (f *fakeGitHub) Clone(nameWithOwner, destination string, stderr io.Writer) error {
 	f.cloneCalled = true
 	f.cloneRepo = nameWithOwner
 	f.cloneDest = destination
 	_, _ = io.WriteString(stderr, "cloning output\n")
 	return f.cloneErr
+}
+
+func (f *fakeGitHub) CreateRepository(owner, name string, visibility string, description string) error {
+	f.createOwner = owner
+	f.createName = name
+	f.createVisibility = visibility
+	f.createDesc = description
+	return f.createErr
+}
+
+func (f *fakeGitHub) RemoteURL(owner, name string) (string, error) {
+	if f.remoteURL != "" {
+		return f.remoteURL, nil
+	}
+	return fmt.Sprintf("https://github.com/%s/%s.git", owner, name), nil
 }
 
 func TestCloneWithOwnerArgumentListsOwnerRepositories(t *testing.T) {
@@ -523,5 +580,79 @@ func TestCloneSelectsOrganizationInteractively(t *testing.T) {
 	wantThirdList := []string{"__SWITCH_ORG__", "org-b/tool"}
 	if !reflect.DeepEqual(selector.optionsList[2], wantThirdList) {
 		t.Fatalf("optionsList[2] = %#v, want %#v", selector.optionsList[2], wantThirdList)
+	}
+}
+
+func TestInitCommandRequiresTTY(t *testing.T) {
+	home := t.TempDir()
+	var stdout, stderr bytes.Buffer
+	exitCode := app.New(app.Config{
+		HomeDir:    home,
+		Stdout:     &stdout,
+		Stderr:     &stderr,
+		IsTerminal: false,
+	}).Run([]string{"init"})
+
+	if exitCode == 0 {
+		t.Fatal("exit code = 0, want non-zero")
+	}
+	if !strings.Contains(stderr.String(), "init selection requires a TTY") {
+		t.Fatalf("stderr = %q, want TTY error", stderr.String())
+	}
+}
+
+func TestInitCommandSuccess(t *testing.T) {
+	t.Setenv("GIT_AUTHOR_NAME", "Test User")
+	t.Setenv("GIT_AUTHOR_EMAIL", "test@example.com")
+	t.Setenv("GIT_COMMITTER_NAME", "Test User")
+	t.Setenv("GIT_COMMITTER_EMAIL", "test@example.com")
+
+	home := t.TempDir()
+
+	// Create a dummy bare repository to act as the remote
+	remoteDir := t.TempDir()
+	cmd := exec.Command("git", "init", "--bare")
+	cmd.Dir = remoteDir
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("failed to init bare repo: %v", err)
+	}
+
+	gh := &fakeGitHub{
+		username:  "myuser",
+		orgs:      []string{"org-a"},
+		protocol:  "ssh",
+		remoteURL: remoteDir,
+	}
+	selector := &fakeSelector{
+		selectedList: []string{"org-a", "private"},
+		inputValues:  []string{"cool-project", "My cool project"},
+	}
+
+	var stdout, stderr bytes.Buffer
+	exitCode := app.New(app.Config{
+		HomeDir:    home,
+		Stdout:     &stdout,
+		Stderr:     &stderr,
+		IsTerminal: true,
+		GitHub:     gh,
+		Selector:   selector,
+	}).Run([]string{"init"})
+
+	wantPath := filepath.Join(home, "workspaces", "github.com", "org-a", "cool-project")
+	if exitCode != 0 {
+		t.Fatalf("exit code = %d, stderr = %q", exitCode, stderr.String())
+	}
+	if got := strings.TrimSpace(stdout.String()); got != wantPath {
+		t.Fatalf("stdout = %q, want %q", got, wantPath)
+	}
+
+	gitDir := filepath.Join(wantPath, ".git")
+	if fi, err := os.Stat(gitDir); err != nil || !fi.IsDir() {
+		t.Fatalf(".git directory not found in %s", wantPath)
+	}
+
+	// Verify remote was created with correct parameters
+	if gh.createOwner != "org-a" || gh.createName != "cool-project" || gh.createVisibility != "private" || gh.createDesc != "My cool project" {
+		t.Fatalf("remote repository not created correctly: owner=%q name=%q vis=%q desc=%q", gh.createOwner, gh.createName, gh.createVisibility, gh.createDesc)
 	}
 }

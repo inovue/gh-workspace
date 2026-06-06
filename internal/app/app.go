@@ -33,10 +33,14 @@ type GitHubCLI interface {
 	ListOrganizations() (string, []string, error)
 	Clone(nameWithOwner, destination string, stderr io.Writer) error
 	CurrentUsername() (string, error)
+	GetGitProtocol() (string, error)
+	CreateRepository(owner, name string, visibility string, description string) error
+	RemoteURL(owner, name string) (string, error)
 }
 
 type Selector interface {
 	Select(title string, options []SelectionOption) (string, error)
+	Input(title string, value *string, validate func(string) error) error
 }
 
 type RemoteRepository struct {
@@ -134,6 +138,14 @@ func (a *App) command() *cobra.Command {
 			return a.runClone(args)
 		},
 	}
+	initCmd := &cobra.Command{
+		Use:   "init",
+		Short: "Create and initialize a new local repository",
+		Args:  cobra.NoArgs,
+		RunE: func(_ *cobra.Command, _ []string) error {
+			return a.runInit()
+		},
+	}
 	monkeyCmd := &cobra.Command{
 		Use:    "monkey",
 		Short:  "Run an animated monkey test of the selection UI",
@@ -142,7 +154,7 @@ func (a *App) command() *cobra.Command {
 			return a.runMonkey()
 		},
 	}
-	root.AddCommand(pathCmd, cloneCmd, monkeyCmd)
+	root.AddCommand(pathCmd, cloneCmd, initCmd, monkeyCmd)
 	return root
 }
 
@@ -234,6 +246,145 @@ func (a *App) runClone(args []string) error {
 		return err
 	}
 	return a.clone(ref)
+}
+
+func (a *App) runInit() error {
+	if err := a.checkHome(); err != nil {
+		return err
+	}
+	if !a.isTerminal {
+		return fmt.Errorf("init selection requires a TTY")
+	}
+
+	username, orgs, err := a.github.ListOrganizations()
+	if err != nil {
+		return err
+	}
+
+	owner := username
+	if len(orgs) > 0 {
+		selectedOrg, err := a.selectOrganization()
+		if err != nil {
+			return err
+		}
+		if selectedOrg != "" {
+			owner = selectedOrg
+		}
+	}
+	owner = strings.ToLower(owner)
+
+	var repoName string
+	err = a.selector.Input("Enter repository name", &repoName, func(val string) error {
+		val = strings.TrimSpace(val)
+		if val == "" {
+			return fmt.Errorf("repository name is required")
+		}
+		name := strings.ToLower(val)
+		if !domain.ValidRepoName(name) {
+			return fmt.Errorf("invalid repository name")
+		}
+		dest := a.destinationFor(domain.RepositoryRef{Owner: owner, Name: name})
+		if exists(dest) {
+			return fmt.Errorf("repository already exists: %s", dest)
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	repoName = strings.ToLower(strings.TrimSpace(repoName))
+
+	visibilityOptions := []SelectionOption{
+		{Value: "private", Title: "Private", Description: "Make the repository private"},
+		{Value: "public", Title: "Public", Description: "Make the repository public"},
+	}
+	visibility, err := a.selector.Select("Select visibility", visibilityOptions)
+	if err != nil {
+		return err
+	}
+
+	var description string
+	err = a.selector.Input("Enter repository description (optional)", &description, func(val string) error {
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	description = strings.TrimSpace(description)
+
+	ref := domain.RepositoryRef{Owner: owner, Name: repoName}
+	destination := a.destinationFor(ref)
+
+	if err := os.MkdirAll(destination, 0o755); err != nil {
+		return err
+	}
+
+	rollback := func() {
+		_ = os.RemoveAll(destination)
+	}
+
+	// git init
+	cmd := exec.Command("git", "init")
+	cmd.Dir = destination
+	cmd.Stdout = a.stderr
+	cmd.Stderr = a.stderr
+	if err := cmd.Run(); err != nil {
+		rollback()
+		return fmt.Errorf("failed to run git init: %w", err)
+	}
+
+	// git checkout -B main
+	cmd = exec.Command("git", "checkout", "-B", "main")
+	cmd.Dir = destination
+	cmd.Stdout = a.stderr
+	cmd.Stderr = a.stderr
+	if err := cmd.Run(); err != nil {
+		rollback()
+		return fmt.Errorf("failed to checkout main branch: %w", err)
+	}
+
+	// git commit --allow-empty -m "first commit"
+	cmd = exec.Command("git", "commit", "--allow-empty", "-m", "first commit")
+	cmd.Dir = destination
+	cmd.Stdout = a.stderr
+	cmd.Stderr = a.stderr
+	if err := cmd.Run(); err != nil {
+		rollback()
+		return fmt.Errorf("failed to create first commit: %w", err)
+	}
+
+	// Create remote repository on GitHub
+	if err := a.github.CreateRepository(owner, repoName, visibility, description); err != nil {
+		rollback()
+		return fmt.Errorf("failed to create remote repository on GitHub: %w", err)
+	}
+
+	remoteURL, err := a.github.RemoteURL(owner, repoName)
+	if err != nil {
+		rollback()
+		return err
+	}
+
+	// git remote add origin URL
+	cmd = exec.Command("git", "remote", "add", "origin", remoteURL)
+	cmd.Dir = destination
+	cmd.Stdout = a.stderr
+	cmd.Stderr = a.stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("failed to add remote origin: %w", err)
+	}
+
+	// git push -u origin main
+	cmd = exec.Command("git", "push", "-u", "origin", "main")
+	cmd.Dir = destination
+	cmd.Stdout = a.stderr
+	cmd.Stderr = a.stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("failed to push to remote: %w", err)
+	}
+
+	fmt.Fprintln(a.stdout, destination)
+	return nil
 }
 
 func (a *App) clone(ref domain.RepositoryRef) error {
@@ -465,6 +616,14 @@ func homeDir() (string, error) {
 type huhSelector struct {
 	output   io.Writer
 	isMonkey bool
+}
+
+func (s huhSelector) Input(title string, value *string, validate func(string) error) error {
+	inputField := huh.NewInput().
+		Title(title).
+		Value(value).
+		Validate(validate)
+	return huh.NewForm(huh.NewGroup(inputField)).WithOutput(s.output).Run()
 }
 
 func (s huhSelector) Select(title string, options []SelectionOption) (string, error) {
@@ -729,6 +888,44 @@ func (g ghCLI) CurrentUsername() (string, error) {
 		return "", err
 	}
 	return strings.TrimSpace(string(out)), nil
+}
+
+func (g ghCLI) GetGitProtocol() (string, error) {
+	cmd := exec.Command("gh", "config", "get", "-h", "github.com", "git_protocol")
+	out, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+func (g ghCLI) CreateRepository(owner, name string, visibility string, description string) error {
+	args := []string{"repo", "create", fmt.Sprintf("%s/%s", owner, name)}
+	if visibility == "public" {
+		args = append(args, "--public")
+	} else if visibility == "private" {
+		args = append(args, "--private")
+	} else if visibility == "internal" {
+		args = append(args, "--internal")
+	}
+	if description != "" {
+		args = append(args, "--description", description)
+	}
+	cmd := exec.Command("gh", args...)
+	cmd.Stdout = g.stderr
+	cmd.Stderr = g.stderr
+	return cmd.Run()
+}
+
+func (g ghCLI) RemoteURL(owner, name string) (string, error) {
+	protocol, err := g.GetGitProtocol()
+	if err != nil {
+		protocol = "https"
+	}
+	if protocol == "ssh" {
+		return fmt.Sprintf("git@github.com:%s/%s.git", owner, name), nil
+	}
+	return fmt.Sprintf("https://github.com/%s/%s.git", owner, name), nil
 }
 
 func truncateString(s string, max int) string {

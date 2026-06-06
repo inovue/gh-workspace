@@ -65,13 +65,13 @@ func parseOwnerRepo(raw, original string) (RepositoryRef, error) {
 	}
 	owner := strings.ToLower(parts[0])
 	name := strings.ToLower(parts[1])
-	if !validOwner(owner) || !validRepoName(name) {
+	if !ValidOwner(owner) || !ValidRepoName(name) {
 		return RepositoryRef{}, fmt.Errorf("invalid repository reference: %s", original)
 	}
 	return RepositoryRef{Owner: owner, Name: name}, nil
 }
 
-func validOwner(s string) bool {
+func ValidOwner(s string) bool {
 	if s == "" || s[0] == '-' || s[len(s)-1] == '-' {
 		return false
 	}
@@ -84,7 +84,7 @@ func validOwner(s string) bool {
 	return true
 }
 
-func validRepoName(s string) bool {
+func ValidRepoName(s string) bool {
 	if s == "" || s == "." || s == ".." {
 		return false
 	}
@@ -104,14 +104,14 @@ func ValidLocalLayout(host, owner, repo string) bool {
 	if !strings.Contains(host, ".") || strings.Contains(host, "/") || host == "." || host == ".." {
 		return false
 	}
-	return validLocalOwner(owner) && validRepoName(repo)
+	return ValidLocalOwner(owner) && ValidRepoName(repo)
 }
 
 func DecodeJSON(data []byte, target any) error {
 	return json.Unmarshal(data, target)
 }
 
-func validLocalOwner(s string) bool {
+func ValidLocalOwner(s string) bool {
 	if s == "" || s == "." || s == ".." {
 		return false
 	}
