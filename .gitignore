@@ -1,4 +1,26 @@
-.cache/
-bin/
+# Go binaries and build artifacts
 /gh-workspace
+/bin/
 /dist/
+*.out
+*.test
+*.prof
+
+# Cache and Tooling
+/.cache/
+/.agents/
+
+# IDEs
+/.idea/
+/.vscode/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
