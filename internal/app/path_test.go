@@ -378,17 +378,21 @@ func mkdir(t *testing.T, path string) {
 }
 
 type fakeSelector struct {
-	selected     string
-	selectedList []string
-	selectCount  int
-	err          error
-	options      []string
-	optionsList  [][]string
-	fullOptions  []app.SelectionOption
-	inputValue   string
-	inputValues  []string
-	inputCount   int
+	selected       string
+	selectedList   []string
+	selectCount    int
+	err            error
+	options        []string
+	optionsList    [][]string
+	fullOptions    []app.SelectionOption
+	inputValue     string
+	inputValues    []string
+	inputCount     int
 	inputErr     error
+	confirmed      bool
+	confirmAnswers []bool
+	confirmCount   int
+	confirmErr     error
 }
 
 func (f *fakeSelector) Select(_ string, options []app.SelectionOption) (string, error) {
@@ -433,6 +437,18 @@ func (f *fakeSelector) Input(_ string, value *string, validate func(string) erro
 	return nil
 }
 
+func (f *fakeSelector) Confirm(_ string, _ bool) (bool, error) {
+	if f.confirmErr != nil {
+		return false, f.confirmErr
+	}
+	if len(f.confirmAnswers) > 0 && f.confirmCount < len(f.confirmAnswers) {
+		res := f.confirmAnswers[f.confirmCount]
+		f.confirmCount++
+		return res, nil
+	}
+	return f.confirmed, nil
+}
+
 type fakeGitHub struct {
 	repos             []app.RemoteRepository
 	cloneErr          error
@@ -451,6 +467,9 @@ type fakeGitHub struct {
 	createDesc        string
 	createErr         error
 	remoteURL         string
+	deleteOwner       string
+	deleteName        string
+	deleteErr         error
 }
 
 func (f *fakeGitHub) ListRepositories(owner string) ([]app.RemoteRepository, error) {
@@ -501,6 +520,12 @@ func (f *fakeGitHub) RemoteURL(owner, name string) (string, error) {
 		return f.remoteURL, nil
 	}
 	return fmt.Sprintf("https://github.com/%s/%s.git", owner, name), nil
+}
+
+func (f *fakeGitHub) DeleteRepository(owner, name string) error {
+	f.deleteOwner = owner
+	f.deleteName = name
+	return f.deleteErr
 }
 
 func TestCloneWithOwnerArgumentListsOwnerRepositories(t *testing.T) {
@@ -583,7 +608,7 @@ func TestCloneSelectsOrganizationInteractively(t *testing.T) {
 	}
 }
 
-func TestInitCommandRequiresTTY(t *testing.T) {
+func TestCreateCommandRequiresTTY(t *testing.T) {
 	home := t.TempDir()
 	var stdout, stderr bytes.Buffer
 	exitCode := app.New(app.Config{
@@ -591,17 +616,17 @@ func TestInitCommandRequiresTTY(t *testing.T) {
 		Stdout:     &stdout,
 		Stderr:     &stderr,
 		IsTerminal: false,
-	}).Run([]string{"init"})
+	}).Run([]string{"create"})
 
 	if exitCode == 0 {
 		t.Fatal("exit code = 0, want non-zero")
 	}
-	if !strings.Contains(stderr.String(), "init selection requires a TTY") {
+	if !strings.Contains(stderr.String(), "create selection requires a TTY") {
 		t.Fatalf("stderr = %q, want TTY error", stderr.String())
 	}
 }
 
-func TestInitCommandSuccess(t *testing.T) {
+func TestCreateCommandSuccess(t *testing.T) {
 	t.Setenv("GIT_AUTHOR_NAME", "Test User")
 	t.Setenv("GIT_AUTHOR_EMAIL", "test@example.com")
 	t.Setenv("GIT_COMMITTER_NAME", "Test User")
@@ -636,7 +661,7 @@ func TestInitCommandSuccess(t *testing.T) {
 		IsTerminal: true,
 		GitHub:     gh,
 		Selector:   selector,
-	}).Run([]string{"init"})
+	}).Run([]string{"create"})
 
 	wantPath := filepath.Join(home, "workspaces", "github.com", "org-a", "cool-project")
 	if exitCode != 0 {
@@ -655,4 +680,220 @@ func TestInitCommandSuccess(t *testing.T) {
 	if gh.createOwner != "org-a" || gh.createName != "cool-project" || gh.createVisibility != "private" || gh.createDesc != "My cool project" {
 		t.Fatalf("remote repository not created correctly: owner=%q name=%q vis=%q desc=%q", gh.createOwner, gh.createName, gh.createVisibility, gh.createDesc)
 	}
+}
+
+func TestDeleteExplicitRepositoryRemovesLocalAndRemote(t *testing.T) {
+	home := t.TempDir()
+	repoPath := filepath.Join(home, "workspaces", "github.com", "inovue3", "app")
+	mkdir(t, filepath.Join(repoPath, ".git"))
+
+	gh := &fakeGitHub{}
+	selector := &fakeSelector{confirmAnswers: []bool{true, true}}
+	var stdout, stderr bytes.Buffer
+
+	exitCode := app.New(app.Config{
+		HomeDir:    home,
+		Stdout:     &stdout,
+		Stderr:     &stderr,
+		GitHub:     gh,
+		Selector:   selector,
+		IsTerminal: true,
+	}).Run([]string{"delete", "inovue3/app"})
+
+	if exitCode != 0 {
+		t.Fatalf("exit code = %d, stderr = %q", exitCode, stderr.String())
+	}
+	if gh.deleteOwner != "inovue3" || gh.deleteName != "app" {
+		t.Fatalf("delete remote not called correctly: owner=%q name=%q", gh.deleteOwner, gh.deleteName)
+	}
+	if exists(repoPath) {
+		t.Fatalf("local repository still exists: %s", repoPath)
+	}
+	if !strings.Contains(stdout.String(), "Deleted remote repository: inovue3/app") {
+		t.Fatalf("stdout = %q, want deleted remote message", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "Deleted local repository:") {
+		t.Fatalf("stdout = %q, want deleted local message", stdout.String())
+	}
+}
+
+func TestDeleteWithoutRepositorySelectsFromLocalScan(t *testing.T) {
+	home := t.TempDir()
+	repoPath1 := filepath.Join(home, "workspaces", "github.com", "inovue3", "app")
+	repoPath2 := filepath.Join(home, "workspaces", "github.com", "octo", "tool")
+	mkdir(t, filepath.Join(repoPath1, ".git"))
+	mkdir(t, filepath.Join(repoPath2, ".git"))
+
+	gh := &fakeGitHub{}
+	selector := &fakeSelector{
+		selected:       "github.com/octo/tool",
+		confirmAnswers: []bool{true, true},
+	}
+	var stdout bytes.Buffer
+
+	exitCode := app.New(app.Config{
+		HomeDir:    home,
+		Stdout:     &stdout,
+		GitHub:     gh,
+		Selector:   selector,
+		IsTerminal: true,
+	}).Run([]string{"delete"})
+
+	if exitCode != 0 {
+		t.Fatalf("exit code = %d", exitCode)
+	}
+	if gh.deleteOwner != "octo" || gh.deleteName != "tool" {
+		t.Fatalf("delete remote not called correctly: owner=%q name=%q", gh.deleteOwner, gh.deleteName)
+	}
+	if exists(repoPath2) {
+		t.Fatalf("local repository 2 still exists")
+	}
+	if !exists(repoPath1) {
+		t.Fatalf("local repository 1 should still exist")
+	}
+}
+
+func TestDeleteCancellationLeavesRepositoryIntact(t *testing.T) {
+	home := t.TempDir()
+	repoPath := filepath.Join(home, "workspaces", "github.com", "inovue3", "app")
+	mkdir(t, filepath.Join(repoPath, ".git"))
+
+	gh := &fakeGitHub{}
+	selector := &fakeSelector{confirmAnswers: []bool{true, false}}
+	var stdout, stderr bytes.Buffer
+
+	exitCode := app.New(app.Config{
+		HomeDir:    home,
+		Stdout:     &stdout,
+		Stderr:     &stderr,
+		GitHub:     gh,
+		Selector:   selector,
+		IsTerminal: true,
+	}).Run([]string{"delete", "inovue3/app"})
+
+	if exitCode == 0 {
+		t.Fatal("exit code = 0, want non-zero")
+	}
+	if gh.deleteOwner != "" {
+		t.Fatal("delete remote should not have been called")
+	}
+	if !exists(repoPath) {
+		t.Fatal("local repository should not have been deleted")
+	}
+	if !strings.Contains(stderr.String(), "deletion cancelled") {
+		t.Fatalf("stderr = %q, want cancellation error", stderr.String())
+	}
+}
+
+func TestDeleteLocalOnly(t *testing.T) {
+	home := t.TempDir()
+	repoPath := filepath.Join(home, "workspaces", "github.com", "inovue3", "app")
+	mkdir(t, filepath.Join(repoPath, ".git"))
+
+	gh := &fakeGitHub{}
+	selector := &fakeSelector{confirmAnswers: []bool{false, true}}
+	var stdout, stderr bytes.Buffer
+
+	exitCode := app.New(app.Config{
+		HomeDir:    home,
+		Stdout:     &stdout,
+		Stderr:     &stderr,
+		GitHub:     gh,
+		Selector:   selector,
+		IsTerminal: true,
+	}).Run([]string{"delete", "inovue3/app"})
+
+	if exitCode != 0 {
+		t.Fatalf("exit code = %d, stderr = %q", exitCode, stderr.String())
+	}
+	if gh.deleteOwner != "" {
+		t.Fatal("delete remote should not have been called")
+	}
+	if exists(repoPath) {
+		t.Fatal("local repository should have been deleted")
+	}
+	if strings.Contains(stdout.String(), "Deleted remote repository:") {
+		t.Fatal("stdout should not contain remote deletion message")
+	}
+	if !strings.Contains(stdout.String(), "Deleted local repository:") {
+		t.Fatal("stdout should contain local deletion message")
+	}
+}
+
+func TestDeleteRemoteFailureDoesNotDeleteLocal(t *testing.T) {
+	home := t.TempDir()
+	repoPath := filepath.Join(home, "workspaces", "github.com", "inovue3", "app")
+	mkdir(t, filepath.Join(repoPath, ".git"))
+
+	gh := &fakeGitHub{deleteErr: errors.New("remote deletion failed")}
+	selector := &fakeSelector{confirmAnswers: []bool{true, true}}
+	var stdout, stderr bytes.Buffer
+
+	exitCode := app.New(app.Config{
+		HomeDir:    home,
+		Stdout:     &stdout,
+		Stderr:     &stderr,
+		GitHub:     gh,
+		Selector:   selector,
+		IsTerminal: true,
+	}).Run([]string{"delete", "inovue3/app"})
+
+	if exitCode == 0 {
+		t.Fatal("exit code = 0, want non-zero")
+	}
+	if !exists(repoPath) {
+		t.Fatal("local repository should not have been deleted on remote failure")
+	}
+	if !strings.Contains(stderr.String(), "remote deletion failed") {
+		t.Fatalf("stderr = %q, want remote deletion failure message", stderr.String())
+	}
+}
+
+func TestDeleteNoLocalOnlyRemote(t *testing.T) {
+	home := t.TempDir()
+	gh := &fakeGitHub{}
+	selector := &fakeSelector{confirmAnswers: []bool{true}} // Direct final confirmation since no local repo
+	var stdout, stderr bytes.Buffer
+
+	exitCode := app.New(app.Config{
+		HomeDir:    home,
+		Stdout:     &stdout,
+		Stderr:     &stderr,
+		GitHub:     gh,
+		Selector:   selector,
+		IsTerminal: true,
+	}).Run([]string{"delete", "inovue3/app"})
+
+	if exitCode != 0 {
+		t.Fatalf("exit code = %d, stderr = %q", exitCode, stderr.String())
+	}
+	if gh.deleteOwner != "inovue3" || gh.deleteName != "app" {
+		t.Fatalf("delete remote not called correctly: owner=%q name=%q", gh.deleteOwner, gh.deleteName)
+	}
+	if !strings.Contains(stdout.String(), "Deleted remote repository:") {
+		t.Fatal("stdout should contain remote deletion message")
+	}
+}
+
+func TestDeleteWithoutTTYFails(t *testing.T) {
+	home := t.TempDir()
+	var stdout, stderr bytes.Buffer
+	exitCode := app.New(app.Config{
+		HomeDir:    home,
+		Stdout:     &stdout,
+		Stderr:     &stderr,
+		IsTerminal: false,
+	}).Run([]string{"delete", "inovue3/app"})
+
+	if exitCode == 0 {
+		t.Fatal("exit code = 0, want non-zero")
+	}
+	if !strings.Contains(stderr.String(), "deletion confirmation requires a TTY") {
+		t.Fatalf("stderr = %q, want TTY error", stderr.String())
+	}
+}
+
+func exists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
 }

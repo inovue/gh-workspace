@@ -36,11 +36,13 @@ type GitHubCLI interface {
 	GetGitProtocol() (string, error)
 	CreateRepository(owner, name string, visibility string, description string) error
 	RemoteURL(owner, name string) (string, error)
+	DeleteRepository(owner, name string) error
 }
 
 type Selector interface {
 	Select(title string, options []SelectionOption) (string, error)
 	Input(title string, value *string, validate func(string) error) error
+	Confirm(title string, defaultVal bool) (bool, error)
 }
 
 type RemoteRepository struct {
@@ -138,12 +140,12 @@ func (a *App) command() *cobra.Command {
 			return a.runClone(args)
 		},
 	}
-	initCmd := &cobra.Command{
-		Use:   "init",
-		Short: "Create and initialize a new local repository",
+	createCmd := &cobra.Command{
+		Use:   "create",
+		Short: "Create a new repository locally and on GitHub",
 		Args:  cobra.NoArgs,
 		RunE: func(_ *cobra.Command, _ []string) error {
-			return a.runInit()
+			return a.runCreate()
 		},
 	}
 	monkeyCmd := &cobra.Command{
@@ -154,7 +156,15 @@ func (a *App) command() *cobra.Command {
 			return a.runMonkey()
 		},
 	}
-	root.AddCommand(pathCmd, cloneCmd, initCmd, monkeyCmd)
+	deleteCmd := &cobra.Command{
+		Use:   "delete [repository]",
+		Short: "Delete a repository locally and remotely",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			return a.runDelete(args)
+		},
+	}
+	root.AddCommand(pathCmd, cloneCmd, createCmd, monkeyCmd, deleteCmd)
 	return root
 }
 
@@ -248,12 +258,12 @@ func (a *App) runClone(args []string) error {
 	return a.clone(ref)
 }
 
-func (a *App) runInit() error {
+func (a *App) runCreate() error {
 	if err := a.checkHome(); err != nil {
 		return err
 	}
 	if !a.isTerminal {
-		return fmt.Errorf("init selection requires a TTY")
+		return fmt.Errorf("create selection requires a TTY")
 	}
 
 	username, orgs, err := a.github.ListOrganizations()
@@ -404,6 +414,111 @@ func (a *App) clone(ref domain.RepositoryRef) error {
 		return err
 	}
 	fmt.Fprintln(a.stdout, destination)
+	return nil
+}
+
+func (a *App) runDelete(args []string) error {
+	if err := a.checkHome(); err != nil {
+		return err
+	}
+
+	var ref domain.RepositoryRef
+	var localPath string
+	var hasLocal bool
+
+	if len(args) > 0 {
+		var err error
+		ref, err = domain.ParseGitHubReference(args[0])
+		if err != nil {
+			return err
+		}
+		localPath = a.destinationFor(ref)
+		hasLocal = isGitWorkingTree(localPath)
+	} else {
+		repos, err := a.scanLocalRepositories()
+		if err != nil {
+			return err
+		}
+		if len(repos) == 0 {
+			return fmt.Errorf("no local repositories found to delete")
+		}
+		selected, err := a.selectLocalRepository("Select repository to delete", repos)
+		if err != nil {
+			return err
+		}
+		ref = domain.RepositoryRef{Owner: selected.Owner, Name: selected.Name}
+		localPath = selected.Path
+		hasLocal = true
+	}
+
+	// Determine options
+	deleteRemote := false
+	deleteLocal := hasLocal
+
+	if hasLocal {
+		if a.isTerminal {
+			// Ask if remote should be deleted too
+			var err error
+			deleteRemote, err = a.selector.Confirm(fmt.Sprintf("Delete remote repository %s on GitHub as well?", ref.String()), false)
+			if err != nil {
+				return err
+			}
+		} else {
+			return fmt.Errorf("deletion confirmation requires a TTY")
+		}
+	} else {
+		// No local repository, we must delete remote
+		deleteRemote = true
+	}
+
+	// Final confirmation
+	if a.isTerminal {
+		var confirmMsg strings.Builder
+		confirmMsg.WriteString("Really delete this repository?\n\n")
+		if deleteRemote {
+			confirmMsg.WriteString(fmt.Sprintf("  [Remote] %s (Delete: Yes)\n", ref.String()))
+		} else {
+			confirmMsg.WriteString(fmt.Sprintf("  [Remote] %s (Delete: No)\n", ref.String()))
+		}
+
+		if hasLocal {
+			if deleteLocal {
+				confirmMsg.WriteString(fmt.Sprintf("  [Local]  %s (Delete: Yes)\n", localPath))
+			} else {
+				confirmMsg.WriteString(fmt.Sprintf("  [Local]  %s (Delete: No)\n", localPath))
+			}
+		} else {
+			confirmMsg.WriteString("  [Local]  (Not cloned locally)\n")
+		}
+
+		confirmed, err := a.selector.Confirm(confirmMsg.String(), false)
+		if err != nil {
+			return err
+		}
+		if !confirmed {
+			return fmt.Errorf("deletion cancelled")
+		}
+	} else {
+		return fmt.Errorf("deletion confirmation requires a TTY")
+	}
+
+	// Execute Deletion
+	// 1. Remote (since it's more likely to fail)
+	if deleteRemote {
+		if err := a.github.DeleteRepository(ref.Owner, ref.Name); err != nil {
+			return fmt.Errorf("failed to delete remote repository on GitHub: %w", err)
+		}
+		fmt.Fprintf(a.stdout, "Deleted remote repository: %s\n", ref.String())
+	}
+
+	// 2. Local
+	if deleteLocal {
+		if err := os.RemoveAll(localPath); err != nil {
+			return fmt.Errorf("failed to delete local repository: %w", err)
+		}
+		fmt.Fprintf(a.stdout, "Deleted local repository: %s\n", localPath)
+	}
+
 	return nil
 }
 
@@ -618,6 +733,15 @@ type huhSelector struct {
 	isMonkey bool
 }
 
+func (s huhSelector) Confirm(title string, defaultVal bool) (bool, error) {
+	confirmed := defaultVal
+	confirmField := huh.NewConfirm().
+		Title(title).
+		Value(&confirmed)
+	err := huh.NewForm(huh.NewGroup(confirmField)).WithOutput(s.output).Run()
+	return confirmed, err
+}
+
 func (s huhSelector) Input(title string, value *string, validate func(string) error) error {
 	inputField := huh.NewInput().
 		Title(title).
@@ -822,6 +946,13 @@ func (s *skippingSelect) WithAccessible(accessible bool) huh.Field {
 
 type ghCLI struct {
 	stderr io.Writer
+}
+
+func (g ghCLI) DeleteRepository(owner, name string) error {
+	cmd := exec.Command("gh", "repo", "delete", fmt.Sprintf("%s/%s", owner, name), "--yes")
+	cmd.Stdout = g.stderr
+	cmd.Stderr = g.stderr
+	return cmd.Run()
 }
 
 func (g ghCLI) ListRepositories(owner string) ([]RemoteRepository, error) {
