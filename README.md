@@ -1,171 +1,183 @@
 # gh-workspace
 
-Keep every GitHub repository in one predictable place.
+[![GitHub CLI Extension](https://img.shields.io/badge/gh--extension-installed-blue.svg)](https://cli.github.com/)
+[![Go Version](https://img.shields.io/github/go-mod/go-version/inovue/gh-workspace)](https://golang.org)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-`gh-workspace` is a small [GitHub CLI](https://cli.github.com/) extension that resolves and clones repositories under:
+**gh-workspace** is a GitHub CLI (`gh`) extension designed to keep all your cloned Git repositories organized in one predictable, standardized directory layout:
 
 ```text
-~/workspaces/github.com/{owner}/{repo}
+~/workspaces/github.com/{owner}/{repository}
 ```
 
-It gives scripts, shells, editors, and humans the same answer every time: the absolute local path for a repository.
+By enforcing a consistent directory structure, it eliminates "repository drift" (where projects end up scattered across `~/src`, `~/Downloads`, or `~/Desktop`) and enables clean automation for terminal workflows, editor setups, and scripting.
 
-## Why
+---
 
-Most local checkouts drift into `~/src`, `~/code`, `~/Downloads`, project folders, and one-off temp directories. That makes automation brittle:
+## 🌟 Why gh-workspace?
 
-```bash
-cd ~/workspaces/github.com/cli/cli
-```
+- **Zero Friction Directory Switching**: Navigate straight to any repository without searching or tab-completing complex directory trees.
+- **Predictable Shell Scripts**: Write scripts that reference local paths knowing they will resolve identically across different machines.
+- **Rich Interactive TUI**: Built with [huh](https://github.com/charmbracelet/huh) for beautiful filtering, owner-switching, and single-keypress interactions.
+- **Unified Local & Remote Workflows**: Easily create or delete repositories both locally and on GitHub in a single command.
 
-`gh-workspace` makes that layout the default and gives you composable commands for finding or creating the right checkout.
+---
 
-## Installation
+## 🚀 Quick Start
 
-Install with GitHub CLI:
+Follow these steps to set up and try your first command in 2 minutes.
 
+### 1. Prerequisites
+Make sure you have the following installed:
+- **GitHub CLI (`gh`)** (version 2.0 or higher) and authenticated (`gh auth login`)
+- **Git** available in your system path
+
+### 2. Installation
+Install the extension via the GitHub CLI:
 ```bash
 gh extension install inovue/gh-workspace
 ```
 
-Requirements:
-
-- `gh` installed and authenticated
-- `git` available on your `PATH`
-
-Install a specific release:
-
-```bash
-gh extension install inovue/gh-workspace --pin v0.1.0
-```
-
-Check the extension:
-
+Verify the installation:
 ```bash
 gh workspace --help
 ```
 
-## Usage
+### 3. Basic Operations
 
-Print the path for a repository you already have locally:
+* **Find the path of a repository:**
+  If you have a repository cloned locally under the workspaces folder, print its path:
+  ```bash
+  gh workspace path cli/cli
+  # Output: /home/username/workspaces/github.com/cli/cli
+  ```
 
+* **Clone a repository into the workspace structure:**
+  ```bash
+  gh workspace clone cli/cli
+  # Clones to ~/workspaces/github.com/cli/cli and outputs the path.
+  # If it is already cloned, it just prints the path instantly.
+  ```
+
+---
+
+## 🛠️ Feature Walkthrough & Commands
+
+`gh-workspace` provides four main commands. 
+
+### 1. `gh workspace path [repository]`
+Resolves the absolute path for a local repository.
+
+- **With Argument:** `gh workspace path owner/repo` (supports full URLs, SSH shortcuts).
+  - *Example:* `gh workspace path git@github.com:cli/cli.git` → `/home/username/workspaces/github.com/cli/cli`
+- **Without Argument (Interactive TUI):** Opens a list of all repositories found inside your `~/workspaces` directory. Search and select to output its path.
+
+### 2. `gh workspace clone [repository|owner]`
+Ensures a remote repository is cloned into your workspace layout.
+
+- **With Repository Argument:** Clones the repository to its standardized location and outputs the absolute path. If it already exists, it outputs the path immediately without re-cloning.
+- **With Owner Argument:** Opens the TUI listing remote repositories owned by the specified user or organization. Already-cloned items are dimmed and disabled.
+- **Without Argument:** Opens the TUI listing remote repositories for your personal account.
+  - *Tip:* Select `🔄 Switch Owner...` at the top of the TUI list to browse repositories belonging to your other GitHub Organizations.
+
+### 3. `gh workspace create`
+Creates a brand new repository locally and on GitHub in one workflow.
+
+Run `gh workspace create` to launch an interactive setup:
+1. **Select Owner**: Choose your personal account or one of your GitHub organizations.
+2. **Repository Name**: Enter the name (validated for GitHub rules).
+3. **Visibility**: Select `Public` or `Private`.
+4. **Description**: Optionally input a brief description.
+
+Once confirmed, the command automatically:
+- Creates the local directory under `~/workspaces/github.com/{owner}/{name}`.
+- Runs `git init`, checks out a `main` branch, and creates an empty initial commit.
+- Creates the remote repository on GitHub with the chosen visibility.
+- Sets up the `origin` remote and pushes the `main` branch.
+- Outputs the new repository path.
+
+### 4. `gh workspace delete [repository]`
+Safely cleans up a repository both locally and remotely.
+
+- **Usage:** `gh workspace delete [repository]` (omitting the argument opens a TUI of your local workspace repos).
+- **Workflow:**
+  1. Prompts you to select whether you want to delete the **local directory**, the **remote repository on GitHub**, or **both**.
+  2. Displays a summary of the actions to be taken.
+  3. Asks for a final confirmation.
+  4. Deletes the selected targets and prints completion messages.
+
+---
+
+## 💻 Integrations & Workflows
+
+`gh-workspace` is designed to be composed with other command-line tools.
+
+### GitHub CLI Aliases
+
+You can set up custom shortcuts directly within the GitHub CLI using `gh alias set --shell`.
+
+#### 1. Open in VS Code (`gh ow <repo>`)
+Clones the repository (if not already local) and opens it in Visual Studio Code immediately:
 ```bash
-gh workspace path cli/cli
+gh alias set --shell ow 'code "$(gh workspace clone "$1")"'
 ```
-
-Output:
-
-```text
-/home/you/workspaces/github.com/cli/cli
-```
-
-Clone a repository into the workspace layout:
-
+*Usage:*
 ```bash
-gh workspace clone cli/cli
+gh ow cli/cli
 ```
 
-If the repository is already cloned, `clone` simply prints the existing path.
-
-## Shell Workflows
-
-Jump to a checkout:
-
+#### 2. Run Tests Remotely (`gh wtest <repo>`)
+Executes `make test` inside the repository without manually changing directories:
 ```bash
-cd "$(gh workspace path cli/cli)"
+gh alias set --shell wtest 'make -C "$(gh workspace path "$1")" test'
 ```
-
-Clone and open in your editor:
-
+*Usage:*
 ```bash
-code "$(gh workspace clone cli/cli)"
+gh wtest cli/cli
 ```
 
-Use GitHub URLs directly:
-
+#### 3. List Repository Contents (`gh wlist <repo>`)
+Lists all files in the target repository layout directory:
 ```bash
-gh workspace clone https://github.com/cli/cli.git
-gh workspace path git@github.com:cli/cli.git
+gh alias set --shell wlist 'ls -la "$(gh workspace path "$1")"'
 ```
-
-Pick from an interactive list:
-
+*Usage:*
 ```bash
-gh workspace path
-gh workspace clone
-gh workspace clone my-org
+gh wlist cli/cli
 ```
 
-Interactive lists:
+> [!NOTE]
+> **Shell Navigation Limitation**
+> GitHub CLI aliases run in an isolated subshell. This means you cannot use a `gh` alias to change the working directory of your current terminal session (e.g., trying to run `cd` inside a `gh` alias will not affect your active shell).
+>
+> If you want a quick-navigation command to change your directory, you must define a **shell function** inside your shell configuration (like `~/.bashrc` or `~/.zshrc`):
+>
+> ```bash
+> # Usage: cdw [owner/repo]
+> cdw() {
+>   local target
+>   target=$(gh workspace clone "$@") && cd "$target"
+> }
+> ```
 
-- `path` lists local repositories under `~/workspaces/*/*/*`
-- `clone` without argument lists repositories available to your `gh` account and hides repositories already cloned. You can also select the `🔄 Switch Owner... [<owner>]` option at the top of the list to select and list repositories from any of your organizations.
-- `clone <owner>` (e.g. `clone my-org`) lists the specified organization's or user's repositories and hides repositories already cloned.
+### Script-Friendly Design
+`gh-workspace` adheres strictly to UNIX philosophy:
+- **`stdout`** is reserved exclusively for the resolved absolute path of the repository.
+- **`stderr`** is used for interactive prompts, progress indicators, status logs, and error messages.
 
-## Commands
+This guarantees that command substitution (e.g. `path="$(gh workspace clone cli/cli)"`) stays clean and doesn't capture interactive UI text or warnings.
 
-```bash
-gh workspace path [repository]
-gh workspace clone [repository|owner]
-```
+---
 
-Repository references can be:
+## ⚙️ Design & Specifications
 
-```text
-owner/repo
-https://github.com/owner/repo
-https://github.com/owner/repo.git
-ssh://git@github.com/owner/repo.git
-git@github.com:owner/repo.git
-```
+- **Normalized Paths**: Hostnames, owners, and repository names are always parsed and saved in lowercase to prevent case-sensitivity issues on different OS filesystems.
+- **Git Protocol**: The extension respects your GitHub CLI protocol settings (SSH vs HTTPS) when resolving remote URLs for cloning.
+- **Standard Layout**: The extension works inside `~/workspaces` and supports arbitrary hosts under it (e.g., `~/workspaces/github.com/` or `~/workspaces/gitlab.com/`). However, cloning is currently optimized for GitHub.
 
-Only GitHub.com repository references are supported for cloning. Local repository discovery can still show any valid workspace path shaped like:
+---
 
-```text
-~/workspaces/{host}/{owner}/{repo}
-```
+## 🤝 Contributing
 
-## Script Friendly
-
-Successful commands write exactly one absolute path to stdout.
-
-Progress, prompts, help, and errors go to stderr, so command substitution stays clean:
-
-```bash
-repo_path="$(gh workspace clone cli/cli)"
-make -C "$repo_path" test
-```
-
-## Local Development
-
-Build:
-
-```bash
-make build
-```
-
-Run tests:
-
-```bash
-make test
-```
-
-Install this checkout as a local extension:
-
-```bash
-make extension
-gh extension install .
-```
-
-The checkout directory must be named `gh-workspace`; GitHub CLI uses the directory name to find the extension executable.
-
-## Release
-
-Releases are published from SemVer tags:
-
-```bash
-git tag v0.1.0
-git push origin v0.1.0
-```
-
-The release workflow builds GitHub CLI extension binaries for macOS, Linux, and Windows using GoReleaser. If `gh extension install inovue/gh-workspace` reports that no usable release artifact was found, the release artifacts are missing or misnamed.
+We welcome contributions to fix bugs, add features, or improve documentation!
+Please refer to [CONTRIBUTING.md](file:///home/inovue/workspaces/github.com/inovue/gh-workspace/CONTRIBUTING.md) for information on setting up the local codebase, running tests, and understanding project architecture.

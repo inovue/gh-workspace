@@ -169,6 +169,9 @@ func (a *App) command() *cobra.Command {
 }
 
 func (a *App) runMonkey() error {
+	if err := a.checkHome(); err != nil {
+		return err
+	}
 	if !a.isTerminal {
 		return fmt.Errorf("monkey test requires a TTY")
 	}
@@ -207,6 +210,9 @@ func (a *App) runPath(args []string) error {
 		repos, err := a.scanLocalRepositories()
 		if err != nil {
 			return err
+		}
+		if len(repos) == 0 {
+			return fmt.Errorf("no local repositories found")
 		}
 		selected, err := a.selectLocalRepository("Select repository", repos)
 		if err != nil {

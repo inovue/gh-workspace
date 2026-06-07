@@ -897,3 +897,61 @@ func exists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
 }
+
+func TestPathWithoutRepositoryEmptyLocalScan(t *testing.T) {
+	home := t.TempDir()
+	// No repositories created under home/workspaces
+
+	var stdout, stderr bytes.Buffer
+	exitCode := app.New(app.Config{
+		HomeDir:    home,
+		Stdout:     &stdout,
+		Stderr:     &stderr,
+		IsTerminal: true,
+	}).Run([]string{"path"})
+
+	if exitCode == 0 {
+		t.Fatal("exit code = 0, want non-zero")
+	}
+	if !strings.Contains(stderr.String(), "no local repositories found") {
+		t.Fatalf("stderr = %q, want 'no local repositories found'", stderr.String())
+	}
+}
+
+func TestCreateCommandGitConfigMissing(t *testing.T) {
+	// Clear git environment variables
+	t.Setenv("GIT_AUTHOR_NAME", "")
+	t.Setenv("GIT_AUTHOR_EMAIL", "")
+	t.Setenv("GIT_COMMITTER_NAME", "")
+	t.Setenv("GIT_COMMITTER_EMAIL", "")
+	t.Setenv("HOME", t.TempDir()) // Ensure no global config can be found
+
+	home := t.TempDir()
+
+	gh := &fakeGitHub{
+		username: "myuser",
+	}
+	selector := &fakeSelector{
+		selectedList: []string{"private"},
+		inputValues:  []string{"no-git-config", "Description"},
+	}
+
+	var stdout, stderr bytes.Buffer
+	exitCode := app.New(app.Config{
+		HomeDir:    home,
+		Stdout:     &stdout,
+		Stderr:     &stderr,
+		IsTerminal: true,
+		GitHub:     gh,
+		Selector:   selector,
+	}).Run([]string{"create"})
+
+	if exitCode == 0 {
+		t.Fatal("exit code = 0, want non-zero")
+	}
+	if !strings.Contains(stderr.String(), "failed to create first commit") {
+		t.Fatalf("stderr = %q, want 'failed to create first commit'", stderr.String())
+	}
+}
+
+
