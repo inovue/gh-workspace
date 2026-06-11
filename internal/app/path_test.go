@@ -388,7 +388,7 @@ type fakeSelector struct {
 	inputValue     string
 	inputValues    []string
 	inputCount     int
-	inputErr     error
+	inputErr       error
 	confirmed      bool
 	confirmAnswers []bool
 	confirmCount   int
@@ -450,26 +450,26 @@ func (f *fakeSelector) Confirm(_ string, _ bool) (bool, error) {
 }
 
 type fakeGitHub struct {
-	repos             []app.RemoteRepository
-	cloneErr          error
-	cloneCalled       bool
-	cloneRepo         string
-	cloneDest         string
-	listOwner         string
-	username          string
-	orgs              []string
-	orgsErr           error
-	protocol          string
-	protocolErr       error
-	createOwner       string
-	createName        string
-	createVisibility  string
-	createDesc        string
-	createErr         error
-	remoteURL         string
-	deleteOwner       string
-	deleteName        string
-	deleteErr         error
+	repos            []app.RemoteRepository
+	cloneErr         error
+	cloneCalled      bool
+	cloneRepo        string
+	cloneDest        string
+	listOwner        string
+	username         string
+	orgs             []string
+	orgsErr          error
+	protocol         string
+	protocolErr      error
+	createOwner      string
+	createName       string
+	createVisibility string
+	createDesc       string
+	createErr        error
+	remoteURL        string
+	deleteOwner      string
+	deleteName       string
+	deleteErr        error
 }
 
 func (f *fakeGitHub) ListRepositories(owner string) ([]app.RemoteRepository, error) {
@@ -624,6 +624,9 @@ func TestCreateCommandRequiresTTY(t *testing.T) {
 	if !strings.Contains(stderr.String(), "create selection requires a TTY") {
 		t.Fatalf("stderr = %q, want TTY error", stderr.String())
 	}
+	if got := stdout.String(); got != "" {
+		t.Fatalf("stdout = %q, want empty", got)
+	}
 }
 
 func TestCreateCommandSuccess(t *testing.T) {
@@ -667,8 +670,8 @@ func TestCreateCommandSuccess(t *testing.T) {
 	if exitCode != 0 {
 		t.Fatalf("exit code = %d, stderr = %q", exitCode, stderr.String())
 	}
-	if got := strings.TrimSpace(stdout.String()); got != wantPath {
-		t.Fatalf("stdout = %q, want %q", got, wantPath)
+	if got := stdout.String(); got != wantPath+"\n" {
+		t.Fatalf("stdout = %q, want %q", got, wantPath+"\n")
 	}
 
 	gitDir := filepath.Join(wantPath, ".git")
@@ -709,11 +712,14 @@ func TestDeleteExplicitRepositoryRemovesLocalAndRemote(t *testing.T) {
 	if exists(repoPath) {
 		t.Fatalf("local repository still exists: %s", repoPath)
 	}
-	if !strings.Contains(stdout.String(), "Deleted remote repository: inovue3/app") {
-		t.Fatalf("stdout = %q, want deleted remote message", stdout.String())
+	if got := stdout.String(); got != repoPath+"\n" {
+		t.Fatalf("stdout = %q, want %q", got, repoPath+"\n")
 	}
-	if !strings.Contains(stdout.String(), "Deleted local repository:") {
-		t.Fatalf("stdout = %q, want deleted local message", stdout.String())
+	if !strings.Contains(stderr.String(), "Deleted remote repository: inovue3/app") {
+		t.Fatalf("stderr = %q, want deleted remote message", stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "Deleted local repository:") {
+		t.Fatalf("stderr = %q, want deleted local message", stderr.String())
 	}
 }
 
@@ -751,6 +757,9 @@ func TestDeleteWithoutRepositorySelectsFromLocalScan(t *testing.T) {
 	if !exists(repoPath1) {
 		t.Fatalf("local repository 1 should still exist")
 	}
+	if got := stdout.String(); got != repoPath2+"\n" {
+		t.Fatalf("stdout = %q, want %q", got, repoPath2+"\n")
+	}
 }
 
 func TestDeleteCancellationLeavesRepositoryIntact(t *testing.T) {
@@ -783,6 +792,9 @@ func TestDeleteCancellationLeavesRepositoryIntact(t *testing.T) {
 	if !strings.Contains(stderr.String(), "deletion cancelled") {
 		t.Fatalf("stderr = %q, want cancellation error", stderr.String())
 	}
+	if got := stdout.String(); got != "" {
+		t.Fatalf("stdout = %q, want empty", got)
+	}
 }
 
 func TestDeleteLocalOnly(t *testing.T) {
@@ -812,11 +824,14 @@ func TestDeleteLocalOnly(t *testing.T) {
 	if exists(repoPath) {
 		t.Fatal("local repository should have been deleted")
 	}
-	if strings.Contains(stdout.String(), "Deleted remote repository:") {
-		t.Fatal("stdout should not contain remote deletion message")
+	if got := stdout.String(); got != repoPath+"\n" {
+		t.Fatalf("stdout = %q, want %q", got, repoPath+"\n")
 	}
-	if !strings.Contains(stdout.String(), "Deleted local repository:") {
-		t.Fatal("stdout should contain local deletion message")
+	if strings.Contains(stderr.String(), "Deleted remote repository:") {
+		t.Fatal("stderr should not contain remote deletion message")
+	}
+	if !strings.Contains(stderr.String(), "Deleted local repository:") {
+		t.Fatal("stderr should contain local deletion message")
 	}
 }
 
@@ -847,6 +862,9 @@ func TestDeleteRemoteFailureDoesNotDeleteLocal(t *testing.T) {
 	if !strings.Contains(stderr.String(), "remote deletion failed") {
 		t.Fatalf("stderr = %q, want remote deletion failure message", stderr.String())
 	}
+	if got := stdout.String(); got != "" {
+		t.Fatalf("stdout = %q, want empty", got)
+	}
 }
 
 func TestDeleteNoLocalOnlyRemote(t *testing.T) {
@@ -870,8 +888,12 @@ func TestDeleteNoLocalOnlyRemote(t *testing.T) {
 	if gh.deleteOwner != "inovue3" || gh.deleteName != "app" {
 		t.Fatalf("delete remote not called correctly: owner=%q name=%q", gh.deleteOwner, gh.deleteName)
 	}
-	if !strings.Contains(stdout.String(), "Deleted remote repository:") {
-		t.Fatal("stdout should contain remote deletion message")
+	wantPath := filepath.Join(home, "workspaces", "github.com", "inovue3", "app")
+	if got := stdout.String(); got != wantPath+"\n" {
+		t.Fatalf("stdout = %q, want %q", got, wantPath+"\n")
+	}
+	if !strings.Contains(stderr.String(), "Deleted remote repository:") {
+		t.Fatal("stderr should contain remote deletion message")
 	}
 }
 
@@ -890,6 +912,9 @@ func TestDeleteWithoutTTYFails(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "deletion confirmation requires a TTY") {
 		t.Fatalf("stderr = %q, want TTY error", stderr.String())
+	}
+	if got := stdout.String(); got != "" {
+		t.Fatalf("stdout = %q, want empty", got)
 	}
 }
 
@@ -952,6 +977,7 @@ func TestCreateCommandGitConfigMissing(t *testing.T) {
 	if !strings.Contains(stderr.String(), "failed to create first commit") {
 		t.Fatalf("stderr = %q, want 'failed to create first commit'", stderr.String())
 	}
+	if got := stdout.String(); got != "" {
+		t.Fatalf("stdout = %q, want empty", got)
+	}
 }
-
-

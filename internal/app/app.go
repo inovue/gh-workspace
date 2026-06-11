@@ -119,7 +119,7 @@ func (a *App) Run(args []string) int {
 func (a *App) command() *cobra.Command {
 	root := &cobra.Command{
 		Use:           "workspace",
-		Short:         "Resolve and clone repositories in a local workspace",
+		Short:         "Manage repositories and print their local workspace paths",
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}
@@ -142,7 +142,7 @@ func (a *App) command() *cobra.Command {
 	}
 	createCmd := &cobra.Command{
 		Use:   "create",
-		Short: "Create a new repository locally and on GitHub",
+		Short: "Create a new repository and print its path",
 		Args:  cobra.NoArgs,
 		RunE: func(_ *cobra.Command, _ []string) error {
 			return a.runCreate()
@@ -158,7 +158,7 @@ func (a *App) command() *cobra.Command {
 	}
 	deleteCmd := &cobra.Command{
 		Use:   "delete [repository]",
-		Short: "Delete a repository locally and remotely",
+		Short: "Delete a repository and print its former path",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			return a.runDelete(args)
@@ -198,7 +198,11 @@ func (a *App) runMonkey() error {
 	if err != nil {
 		return err
 	}
-	fmt.Fprintln(a.stdout, "Selected:", selected)
+	ref, err := domain.ParseGitHubReference(selected)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintln(a.stdout, a.destinationFor(ref))
 	return nil
 }
 
@@ -514,7 +518,7 @@ func (a *App) runDelete(args []string) error {
 		if err := a.github.DeleteRepository(ref.Owner, ref.Name); err != nil {
 			return fmt.Errorf("failed to delete remote repository on GitHub: %w", err)
 		}
-		fmt.Fprintf(a.stdout, "Deleted remote repository: %s\n", ref.String())
+		fmt.Fprintf(a.stderr, "Deleted remote repository: %s\n", ref.String())
 	}
 
 	// 2. Local
@@ -522,9 +526,10 @@ func (a *App) runDelete(args []string) error {
 		if err := os.RemoveAll(localPath); err != nil {
 			return fmt.Errorf("failed to delete local repository: %w", err)
 		}
-		fmt.Fprintf(a.stdout, "Deleted local repository: %s\n", localPath)
+		fmt.Fprintf(a.stderr, "Deleted local repository: %s\n", localPath)
 	}
 
+	fmt.Fprintln(a.stdout, localPath)
 	return nil
 }
 
@@ -736,6 +741,7 @@ func homeDir() (string, error) {
 
 type huhSelector struct {
 	output   io.Writer
+	input    io.Reader
 	isMonkey bool
 }
 
@@ -744,7 +750,11 @@ func (s huhSelector) Confirm(title string, defaultVal bool) (bool, error) {
 	confirmField := huh.NewConfirm().
 		Title(title).
 		Value(&confirmed)
-	err := huh.NewForm(huh.NewGroup(confirmField)).WithOutput(s.output).Run()
+	form := huh.NewForm(huh.NewGroup(confirmField)).WithOutput(s.output)
+	if s.input != nil {
+		form.WithInput(s.input)
+	}
+	err := form.Run()
 	return confirmed, err
 }
 
@@ -753,7 +763,11 @@ func (s huhSelector) Input(title string, value *string, validate func(string) er
 		Title(title).
 		Value(value).
 		Validate(validate)
-	return huh.NewForm(huh.NewGroup(inputField)).WithOutput(s.output).Run()
+	form := huh.NewForm(huh.NewGroup(inputField)).WithOutput(s.output)
+	if s.input != nil {
+		form.WithInput(s.input)
+	}
+	return form.Run()
 }
 
 func (s huhSelector) Select(title string, options []SelectionOption) (string, error) {
@@ -804,8 +818,7 @@ func (s huhSelector) Select(title string, options []SelectionOption) (string, er
 		rng:      rand.New(rand.NewSource(time.Now().UnixNano())),
 	}
 
-	err := huh.NewForm(huh.NewGroup(wrappedSelect)).
-		WithOutput(s.output).
+	form := huh.NewForm(huh.NewGroup(wrappedSelect)).
 		WithProgramOptions(
 			tea.WithMouseCellMotion(),
 			tea.WithFilter(func(m tea.Model, msg tea.Msg) tea.Msg {
@@ -819,7 +832,11 @@ func (s huhSelector) Select(title string, options []SelectionOption) (string, er
 				return msg
 			}),
 		).
-		Run()
+		WithOutput(s.output)
+	if s.input != nil {
+		form.WithInput(s.input)
+	}
+	err := form.Run()
 	return selected, err
 }
 

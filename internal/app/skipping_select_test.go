@@ -1,11 +1,73 @@
 package app
 
 import (
+	"bytes"
+	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/huh"
 )
+
+func TestHuhSelectorWritesSelectionUIToConfiguredOutput(t *testing.T) {
+	var output bytes.Buffer
+	selector := huhSelector{
+		input:  strings.NewReader("\r"),
+		output: &output,
+	}
+
+	selected, err := selector.Select("Select repository", []SelectionOption{
+		{Value: "github.com/inovue/gh-workspace", Title: "inovue/gh-workspace"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if selected != "github.com/inovue/gh-workspace" {
+		t.Fatalf("selected = %q", selected)
+	}
+	if output.Len() == 0 {
+		t.Fatal("selection UI was not written to configured output")
+	}
+}
+
+func TestHuhSelectorWritesInputUIToConfiguredOutput(t *testing.T) {
+	var output bytes.Buffer
+	var value string
+	selector := huhSelector{
+		input:  strings.NewReader("new-repo\r"),
+		output: &output,
+	}
+
+	err := selector.Input("Enter repository name", &value, func(string) error { return nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if value != "new-repo" {
+		t.Fatalf("value = %q", value)
+	}
+	if output.Len() == 0 {
+		t.Fatal("input UI was not written to configured output")
+	}
+}
+
+func TestHuhSelectorWritesConfirmUIToConfiguredOutput(t *testing.T) {
+	var output bytes.Buffer
+	selector := huhSelector{
+		input:  strings.NewReader("y\r"),
+		output: &output,
+	}
+
+	confirmed, err := selector.Confirm("Confirm deletion", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !confirmed {
+		t.Fatal("confirmed = false")
+	}
+	if output.Len() == 0 {
+		t.Fatal("confirmation UI was not written to configured output")
+	}
+}
 
 func TestSkippingSelect(t *testing.T) {
 	options := []SelectionOption{

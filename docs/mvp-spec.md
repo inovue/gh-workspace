@@ -7,6 +7,8 @@
 ```bash
 gh workspace path [repository]
 gh workspace clone [repository]
+gh workspace create
+gh workspace delete [repository]
 ```
 
 `gh workspace` without a subcommand shows help.
@@ -172,9 +174,11 @@ stdout:
 
 - path only
 - exactly one absolute path on success
+- applies to every repository subcommand, including `create` and `delete`
 - paths are lexical absolute paths; symlinks are not resolved
 - empty on failure or cancellation
 - intended for shell composition
+- `delete` returns the deleted repository's former local path, which may no longer exist
 
 stderr:
 

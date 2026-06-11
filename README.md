@@ -104,7 +104,7 @@ Safely cleans up a repository both locally and remotely.
   1. Prompts you to select whether you want to delete the **local directory**, the **remote repository on GitHub**, or **both**.
   2. Displays a summary of the actions to be taken.
   3. Asks for a final confirmation.
-  4. Deletes the selected targets and prints completion messages.
+  4. Deletes the selected targets and outputs the repository's workspace path.
 
 ---
 
@@ -161,11 +161,13 @@ gh wlist cli/cli
 > ```
 
 ### Script-Friendly Design
-`gh-workspace` adheres strictly to UNIX philosophy:
+`gh-workspace` adheres strictly to UNIX philosophy for every subcommand:
 - **`stdout`** is reserved exclusively for the resolved absolute path of the repository.
 - **`stderr`** is used for interactive prompts, progress indicators, status logs, and error messages.
 
 This guarantees that command substitution (e.g. `path="$(gh workspace clone cli/cli)"`) stays clean and doesn't capture interactive UI text or warnings.
+
+For `delete`, the returned path identifies the deleted repository's former workspace location and may no longer exist.
 
 ---
 
