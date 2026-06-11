@@ -2,7 +2,7 @@
 
 ### Issue tracker
 
-Issues and PRDs are tracked as local markdown under `.scratch/`. See `docs/agents/issue-tracker.md`.
+Issues and PRDs are tracked in GitHub Issues. See `docs/agents/issue-tracker.md`.
 
 ### Triage labels
 
