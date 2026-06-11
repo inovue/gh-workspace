@@ -1,3 +1,7 @@
+---
+status: superseded by ADR-0014
+---
+
 # Use command-first CLI with optional selection
 
 `gh-workspace` will expose repository actions as direct subcommands and open an interactive selection prompt only when the repository argument is omitted. The MVP commands are `path` and `clone`. This keeps the extension scriptable and predictable while preserving the convenience of choosing from discovered repositories.

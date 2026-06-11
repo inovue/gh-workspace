@@ -17,11 +17,11 @@ To build and test `gh-workspace`, you will need:
 
 ## Core Concepts
 
-Before diving into the code, please align with the domain terms defined in the [CONTEXT.md](file:///home/inovue/workspaces/github.com/inovue/gh-workspace/CONTEXT.md):
+Before diving into the code, please align with the domain terms defined in [CONTEXT.md](./CONTEXT.md):
 
-- **Workspace Launcher**: A tool (this extension) for selecting a repository, resolving its local path, or cloning it.
-- **Managed Root**: The directory (`~/workspaces`) where `gh-workspace` clones repositories using a stable `host/owner/name` layout.
-- **Repository Reference**: An argument that identifies a GitHub repository (e.g., `owner/repo`, HTTPS/SSH URLs).
+- **Workspace Launcher**: A tool for managing repositories through predictable local workspace paths.
+- **Workspace**: The local directory tree organized by host, owner, and repository name.
+- **Repository Reference**: An explicit argument that identifies a GitHub.com repository by owner and name.
 
 ---
 

@@ -18,7 +18,7 @@ By enforcing a consistent directory structure, it eliminates "repository drift" 
 
 - **Zero Friction Directory Switching**: Navigate straight to any repository without searching or tab-completing complex directory trees.
 - **Predictable Shell Scripts**: Write scripts that reference local paths knowing they will resolve identically across different machines.
-- **Rich Interactive TUI**: Built with [huh](https://github.com/charmbracelet/huh) for beautiful filtering, owner-switching, and single-keypress interactions.
+- **Focused Interactive Selection**: Built with [huh](https://github.com/charmbracelet/huh) for filtering, owner switching, and confirmation prompts.
 - **Unified Local & Remote Workflows**: Easily create or delete repositories both locally and on GitHub in a single command.
 
 ---
@@ -101,10 +101,11 @@ Safely cleans up a repository both locally and remotely.
 
 - **Usage:** `gh workspace delete [repository]` (omitting the argument opens a TUI of your local workspace repos).
 - **Workflow:**
-  1. Prompts you to select whether you want to delete the **local directory**, the **remote repository on GitHub**, or **both**.
-  2. Displays a summary of the actions to be taken.
-  3. Asks for a final confirmation.
-  4. Deletes the selected targets and outputs the repository's workspace path.
+  1. If the repository is local, prompts whether to also delete the **remote repository on GitHub**. The local repository is deleted after confirmation.
+  2. If the repository is not local, targets the remote repository.
+  3. Displays a summary of the actions to be taken.
+  4. Asks for a final confirmation.
+  5. Deletes the selected targets and outputs the repository's workspace path.
 
 ---
 
@@ -175,11 +176,11 @@ For `delete`, the returned path identifies the deleted repository's former works
 
 - **Normalized Paths**: Hostnames, owners, and repository names are always parsed and saved in lowercase to prevent case-sensitivity issues on different OS filesystems.
 - **Git Protocol**: The extension respects your GitHub CLI protocol settings (SSH vs HTTPS) when resolving remote URLs for cloning.
-- **Standard Layout**: The extension works inside `~/workspaces` and supports arbitrary hosts under it (e.g., `~/workspaces/github.com/` or `~/workspaces/gitlab.com/`). However, cloning is currently optimized for GitHub.
+- **Standard Layout**: Local discovery supports arbitrary hosts under `~/workspaces` (e.g., `github.com` or `gitlab.com`). Remote clone, create, and delete operations target GitHub.com.
 
 ---
 
 ## 🤝 Contributing
 
 We welcome contributions to fix bugs, add features, or improve documentation!
-Please refer to [CONTRIBUTING.md](file:///home/inovue/workspaces/github.com/inovue/gh-workspace/CONTRIBUTING.md) for information on setting up the local codebase, running tests, and understanding project architecture.
+Please refer to [CONTRIBUTING.md](./CONTRIBUTING.md) for information on setting up the local codebase, running tests, and understanding project architecture.

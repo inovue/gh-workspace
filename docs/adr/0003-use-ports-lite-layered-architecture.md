@@ -1,3 +1,7 @@
+---
+status: superseded by ADR-0015
+---
+
 # Use ports-lite layered architecture
 
 `gh-workspace` will use a small layered architecture with `cmd/gh-workspace`, `internal/domain`, `internal/app`, `internal/adapters`, and `internal/ui`. This keeps the domain and use cases testable without introducing a full clean-architecture package tree that would be too heavy for a personal GitHub CLI extension.

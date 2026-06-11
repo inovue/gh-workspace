@@ -1,21 +1,21 @@
-# gh-workspace MVP Spec
+# gh-workspace Current Specification
 
-`gh-workspace` is a small GitHub CLI extension for resolving local repository paths and cloning GitHub.com repositories into a predictable local layout.
+`gh-workspace` is a command-first GitHub CLI extension for managing repositories through a predictable local workspace layout.
 
 ## Commands
 
 ```bash
 gh workspace path [repository]
-gh workspace clone [repository]
+gh workspace clone [repository|owner]
 gh workspace create
 gh workspace delete [repository]
 ```
 
-`gh workspace` without a subcommand shows help.
+`gh workspace` without a subcommand shows help. The hidden `monkey` command exercises the selection UI.
 
 ## Repository References
 
-Explicit repository arguments may be:
+Explicit repository references accept:
 
 - `owner/repo`
 - `https://github.com/owner/repo`
@@ -23,204 +23,105 @@ Explicit repository arguments may be:
 - `git@github.com:owner/repo.git`
 - `ssh://git@github.com/owner/repo.git`
 
-All accepted forms are normalized to `owner/repo` for GitHub CLI operations and to `~/workspaces/github.com/{owner}/{repo}` for local paths.
-Host, owner, and repository path segments are lowercased during normalization.
+References are normalized to lowercase `owner/repo`. Repo-only shorthand, non-GitHub.com URLs, extra path segments, traversal, and `owner/repo.git` shorthand are rejected.
 
-MVP rejects:
+An owner-only argument is accepted by `clone` and opens remote repository selection for that owner.
 
-- repo-only shorthand such as `repo`
-- shorthand with `.git` suffix such as `owner/repo.git`
-- non-GitHub.com URLs
-- paths with extra segments
-- path traversal such as `../owner/repo`
+## Workspace Layout
 
-Owner validation:
-
-- ASCII letters, digits, and `-`
-- must start and end with an ASCII letter or digit
-
-Repository name validation:
-
-- ASCII letters, digits, `.`, `_`, and `-`
-- must not be `.` or `..`
-
-## Local Layout
-
-Default root:
-
-```text
-~/workspaces
-```
-
-Implementation derives this from the current user's home directory. If the home directory cannot be determined, commands fail with stderr output, empty stdout, and a non-zero exit code.
-
-Repository path:
+The workspace root is `~/workspaces`. Repository paths use:
 
 ```text
 ~/workspaces/{host}/{owner}/{repo}
 ```
 
-All path identity segments are lowercase.
-
-GitHub.com clone example:
+GitHub.com commands resolve to:
 
 ```text
-~/workspaces/github.com/inovue3/app
+~/workspaces/github.com/{owner}/{repo}
 ```
 
-## Local Scan
+Path identity comes from the layout, not Git remotes. Identity segments are normalized to lowercase.
 
-`path` scans local repositories in the host/owner/name layout under `~/workspaces`.
+## Local Discovery
 
-Scan candidates are exactly:
+`path` and `delete` discover working-tree repositories exactly three levels below the workspace root:
 
 ```text
 ~/workspaces/*/*/*
 ```
 
-A local repository is a directory with either:
+A repository must contain a `.git` directory or file. Local discovery may include non-GitHub.com hosts. Bare repositories and recursive scanning outside the fixed layout are unsupported.
 
-- `.git` directory
-- `.git` file
+## `path`
 
-Bare repositories are out of scope. `path` is intended to return working-tree directories for `cd` and editor composition.
+With a repository reference, `path` prints its existing GitHub.com workspace path or fails if it is not cloned.
 
-Scan validation:
+Without an argument, `path` requires a TTY and opens a searchable selection UI over discovered local repositories. The UI distinguishes repositories owned by the authenticated GitHub user from organization-owned repositories and may display the repository's Git description.
 
-- host must contain at least one `.`
-- owner must be non-empty and contain only ASCII letters, digits, or `-`
-- repo must be non-empty and contain only ASCII letters, digits, `.`, `_`, or `-`
-- `.` and `..` path segments are rejected
+## `clone`
 
-`path` does not recursively search for `.git` directories below the fixed host/owner/name layout.
+With a repository reference, `clone` returns an existing local repository or runs `gh repo clone` into its GitHub.com workspace path.
 
-`path` may include non-GitHub.com hosts discovered locally, such as:
+With an owner-only argument, `clone` requires a TTY and lists that owner's remote repositories. Without an argument, it starts from the authenticated user's repositories. The selection UI:
 
-```text
-~/workspaces/github.company.com/team/app
-```
+- displays repository descriptions
+- disables already-cloned repositories
+- allows switching between the authenticated user and their organizations
 
-`clone` only targets GitHub.com repositories in the MVP.
+Remote repository lists use `gh repo list --limit 1000`. Cloning protocol and authentication are delegated to GitHub CLI.
 
-The MVP does not inspect `origin` remotes. Repository identity for local paths comes from the `~/workspaces/{host}/{owner}/{repo}` layout.
+## `create`
 
-## path
+`create` requires a TTY. It:
 
-```bash
-gh workspace path owner/repo
-```
+1. selects the authenticated user or one of their organizations
+2. asks for repository name, public/private visibility, and optional description
+3. initializes a local repository on branch `main`
+4. creates an empty initial commit
+5. creates the GitHub repository
+6. adds `origin` using the GitHub CLI protocol preference
+7. pushes `main`
 
-Behavior:
+If local initialization or GitHub repository creation fails, the newly created local directory is removed. Failures after remote creation may require manual cleanup.
 
-- cloned: print absolute local path to stdout and exit `0`
-- not cloned: print error to stderr and exit non-zero
-- invalid or unknown repository reference: print error to stderr and exit non-zero
-- no side effects
+## `delete`
 
-```bash
-gh workspace path
-```
+`delete` always requires a TTY because deletion requires confirmation.
 
-Behavior:
+With a repository reference, it derives the local GitHub.com workspace path. Without an argument, it selects a discovered local repository.
 
-- open selection UI with local scanned repositories only
-- selection options show `owner/repo` with `host` and absolute path as supporting text
-- print selected absolute local path to stdout
-- cancel leaves stdout empty and exits non-zero
-- if no TTY is available, print an error to stderr and exit non-zero
-
-## clone
-
-```bash
-gh workspace clone owner/repo
-```
-
-Behavior:
-
-- if destination is already a git repository: print absolute path to stdout and exit `0`
-- if destination does not exist: run `gh repo clone owner/repo <destination>`
-- before cloning, create only the destination parent directory
-- if clone succeeds: print absolute path to stdout and exit `0`
-- if destination exists but is not a git repository: print error to stderr and exit non-zero
-- if clone fails: print error to stderr and exit non-zero
-- do not delete partially created directories after clone failure
-
-`clone` may attempt `gh repo clone` for an explicit `owner/repo` even if it is not present in the active-user repository list.
-
-When running `gh repo clone`, forward both child stdout and child stderr to parent stderr. Only `gh-workspace` prints the final absolute path to stdout after a successful clone.
-Clone protocol selection is delegated entirely to GitHub CLI configuration.
-
-```bash
-gh workspace clone
-```
-
-Behavior:
-
-- fetch active GitHub CLI user's GitHub.com repositories with `gh repo list --limit 1000 --json nameWithOwner`
-- exclude already cloned repositories
-- open selection UI
-- selection options show `owner/repo` with clone destination as supporting text
-- repository descriptions are not fetched or shown in the MVP
-- clone selected repository
-- print cloned absolute path to stdout
-- cancel leaves stdout empty and exits non-zero
-- if no TTY is available, print an error to stderr and exit non-zero
-
-Remote fetch captures child stdout for JSON parsing and forwards child stderr to parent stderr. The MVP does not paginate beyond 1000 repositories.
+- If a local repository exists, the user chooses whether to delete the GitHub remote; local deletion is included.
+- If no local repository exists, deletion targets the GitHub remote.
+- A final confirmation summarizes remote and local effects.
+- Remote deletion runs before local deletion so a remote failure leaves the local repository intact.
 
 ## Output Contract
 
-stdout:
+On success, every public repository command prints exactly one absolute repository path to stdout:
 
-- path only
-- exactly one absolute path on success
-- applies to every repository subcommand, including `create` and `delete`
-- paths are lexical absolute paths; symlinks are not resolved
-- empty on failure or cancellation
-- intended for shell composition
-- `delete` returns the deleted repository's former local path, which may no longer exist
+- `path`, `clone`, and `create` print an existing path.
+- `delete` prints the repository's former workspace path, which may no longer exist.
 
-stderr:
-
-- selection UI
-- progress
-- errors
-
-Selection prompts must explicitly write to stderr. With Huh, use form output configuration rather than relying on stdout defaults.
-Commands without a repository argument require a TTY because they must open the selection UI. Commands with an explicit repository argument must not require a TTY.
-
-Examples:
-
-```bash
-cd "$(gh workspace path)"
-zed "$(gh workspace path owner/repo)"
-code "$(gh workspace clone owner/repo)"
-cd "$(gh workspace clone)"
-```
+Interactive UI, child-process output, progress, and errors go to stderr. Failure and cancellation leave stdout empty.
 
 ## Dependencies
 
-Runtime:
+Runtime dependencies:
 
-- `gh`
-- `git`
+- GitHub CLI (`gh`)
+- Git
 
-Go modules:
+Primary Go dependencies:
 
-- Cobra for CLI commands
-- Huh for selection prompts
+- Cobra for commands
+- Huh, Bubble Tea, and Lip Gloss for interactive selection
 
-No external picker such as `fzf` is required.
+## Current Boundaries
 
-## Out of Scope
-
-- config file
-- flags
-- organization owner selection
-- GitHub Enterprise cloning
-- browser opening
-- editor launching
-- shell launching
-- lazygit integration
-- list command
-- cache
+- no config file or flags
+- no GitHub Enterprise cloning
+- no browser, editor, shell, or lazygit launching
+- no full-screen dashboard
+- no cache
+- no recursive local repository scan
