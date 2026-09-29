@@ -10,7 +10,7 @@ permissions:
   contents: read
 
 jobs:
-  test:
+  test-matrix:
     name: Test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
@@ -34,3 +34,14 @@ jobs:
 
       - name: Build
         run: go build ./cmd/gh-workspace
+
+  # Branch protection requires a single "Test" check; it passes only when
+  # every platform passes.
+  test:
+    name: Test
+    needs: test-matrix
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every platform to pass
+        run: test "${{ needs.test-matrix.result }}" = success
