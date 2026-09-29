@@ -8,7 +8,7 @@ Thank you for your interest in contributing to `gh-workspace`! This document gui
 
 To build and test `gh-workspace`, you will need:
 
-- **Go**: 1.23.0 or higher
+- **Go**: the version in `go.mod` or higher
 - **GitHub CLI (`gh`)**: Installed and authenticated (`gh auth status`)
 - **Git**: Installed and available on your `PATH`
 - **Make**: To run build tasks
@@ -17,42 +17,31 @@ To build and test `gh-workspace`, you will need:
 
 ## Core Concepts
 
-Before diving into the code, please align with the domain terms defined in [CONTEXT.md](./CONTEXT.md):
+Before diving into the code, read the domain terms in [CONTEXT.md](./CONTEXT.md), the behavior in [docs/mvp-spec.md](./docs/mvp-spec.md), and the decisions in [docs/adr](./docs/adr). The central ideas are:
 
-- **Workspace Launcher**: A tool for managing repositories through predictable local workspace paths.
-- **Workspace**: The local directory tree organized by host, owner, and repository name.
-- **Repository Reference**: An explicit argument that identifies a GitHub.com repository by owner and name.
+- **Workspace roots**: the directories that are scanned. The first root receives new repositories.
+- **Repository identity**: host, owner, and name, read from the `origin` remote. Paths are only a placement rule.
+- **Canonical path**: `{root}/{owner}/{repo}` for GitHub.com, `{root}/{host}/{owner}/{repo}` for other hosts.
 
 ---
 
 ## Project Structure
 
-The project follows a standard Go layout:
-
 ```text
-├── cmd/
-│   └── gh-workspace/
-│       └── main.go         # App entrypoint (initializes config & parses TTY status)
-├── internal/
-│   ├── app/
-│   │   ├── app.go          # Business logic, Cobra command routing, & TUI (huh/bubbletea)
-│   │   ├── path_test.go    # Unit/Integration tests with mocks
-│   │   └── skipping_select_test.go
-│   └── domain/
-│       ├── reference.go    # GitHub Repository Reference parsing and validation logic
-│       └── reference_test.go
-├── docs/                   # Specifications, ADRs, and other documentations
-└── Makefile                # Make tasks for building and testing
+├── cmd/gh-workspace/main.go        # entrypoint: TTY detection and version
+├── internal/domain/
+│   ├── reference.go                # repository identity, reference and remote URL parsing
+│   └── layout.go                   # canonical path placement and inference
+└── internal/app/
+    ├── app.go                      # config, root resolution, command tree, local resolution
+    ├── workspace.go                # scanning, remote identity, fuzzy matching
+    ├── commands_*.go               # one file per command group
+    ├── github.go                   # GitHubCLI interface and its gh implementation
+    ├── selector.go                 # huh-based prompts on stderr
+    └── *_test.go                   # tests with a fake GitHub CLI and real git
 ```
 
-### Key Commands & Implementation
-
-The core logic resides in `internal/app/app.go` and is structured around these main commands:
-
-- **`path`**: Scans the local workspace directory (`~/workspaces`) for existing Git repositories and prints the matching absolute path. If no repository is specified, it provides an interactive selection using `huh`.
-- **`clone`**: Clones a remote repository into the predictable workspace layout. If no argument is provided, it fetches available repositories from GitHub and offers a search/select UI.
-- **`create`**: Guides the user through creating a new repository. It prompts for owner (personal account or organization), name, visibility, and description. It then initializes a local git repo (via `git init`), commits, creates the GitHub repository (via `gh repo create`), and pushes the initial commit.
-- **`delete`**: Safely deletes a repository. It prompts the user to confirm whether to delete the local directory, the remote GitHub repository, or both.
+Tests replace GitHub with `fakeGitHub` and use real `git` for local behavior. They isolate git from your global configuration.
 
 ---
 
@@ -94,15 +83,15 @@ gh extension remove workspace
 
 ---
 
-## Automated UI Testing (Monkey Test)
+## Trying the Interactive UI
 
-The project includes an interactive TUI built with [huh](https://github.com/charmbracelet/huh). To verify the rendering and navigation flow without manual keypresses, you can run a **Monkey Test**:
+Point the extension at a scratch root so your real workspace is untouched:
 
 ```bash
-go run ./cmd/gh-workspace monkey
+export GH_WORKSPACE_ROOT="$(mktemp -d)"
+go run ./cmd/gh-workspace clone cli/go-gh
+go run ./cmd/gh-workspace path
 ```
-
-This hidden command triggers a simulated interaction loop inside the TUI selection list.
 
 ---
 

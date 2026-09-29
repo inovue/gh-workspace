@@ -1,3 +1,7 @@
+---
+status: superseded by ADR-0016
+---
+
 # Use host/owner/name clone layout
 
 `gh-workspace` will default to cloning repositories under `~/workspaces/{host}/{owner}/{repo}`. This keeps the common GitHub.com case predictable while preserving a clean path for future GitHub Enterprise support without relocating existing clones.
