@@ -1,127 +1,135 @@
 # gh-workspace Current Specification
 
-`gh-workspace` is a command-first GitHub CLI extension for managing repositories through a predictable local workspace layout.
+`gh-workspace` is a command-first GitHub CLI extension that keeps repositories in one predictable workspace and resolves them to local paths.
 
 ## Commands
 
 ```bash
-gh workspace path [repository]
-gh workspace clone [repository|owner]
-gh workspace create
-gh workspace delete [repository]
+gh workspace path   [repository|query]
+gh workspace list   [query] [--full-path] [--json]
+gh workspace clone  [repository...|owner] [-- <git clone flags>]
+gh workspace create [[owner/]name] [--public|--private|--internal] [--description text] [--template owner/repo]
+gh workspace delete [repository|query] [--remote] [--yes] [--force]
+gh workspace root   [--all]
+gh workspace migrate [--apply]
+gh workspace shell-init [bash|zsh|fish|pwsh] [--name ws]
 ```
 
-`gh workspace` without a subcommand shows help. The hidden `monkey` command exercises the selection UI.
+`gh workspace` without a subcommand shows help; `--version` prints the version.
 
-## Repository References
+## Workspace Roots
 
-Explicit repository references accept:
+Roots come from the first source that is set:
 
-- `owner/repo`
-- `https://github.com/owner/repo`
-- `https://github.com/owner/repo.git`
-- `git@github.com:owner/repo.git`
-- `ssh://git@github.com/owner/repo.git`
+1. `GH_WORKSPACE_ROOT`, separated like `PATH`
+2. git config `gh-workspace.root`, which may be repeated
+3. `~/workspaces`
 
-References are normalized to lowercase `owner/repo`. Repo-only shorthand, non-GitHub.com URLs, extra path segments, traversal, and `owner/repo.git` shorthand are rejected.
+A leading `~` is expanded. The first root is primary: new repositories go there. Every root is scanned.
 
-An owner-only argument is accepted by `clone` and opens remote repository selection for that owner.
+## Layout and Identity
 
-## Workspace Layout
-
-The workspace root is `~/workspaces`. Repository paths use:
+New repositories are placed at their canonical path:
 
 ```text
-~/workspaces/{host}/{owner}/{repo}
+{root}/{owner}/{repo}          GitHub.com
+{root}/{host}/{owner}/{repo}   any other host
 ```
 
-GitHub.com commands resolve to:
+Owners on GitHub.com never contain `.`, so a top-level directory containing `.` is a host directory.
 
-```text
-~/workspaces/github.com/{owner}/{repo}
-```
+Local repositories are found by scanning up to three directory levels below each root. Hidden directories are skipped, and scanning does not descend into repositories. A repository's identity comes from its `origin` remote (or its first remote). Without a parsable remote, the identity is inferred from the current or legacy `{root}/github.com/{owner}/{repo}` layout. Repositories without an identity are still listed and can be matched by path.
 
-Path identity comes from the layout, not Git remotes. Identity segments are normalized to lowercase.
+Identities compare case-insensitively. Folders use the canonical casing that GitHub reports.
 
-## Local Discovery
+Linked worktrees are recognized. They share their main working tree's identity, and commands that resolve an identity prefer the main working tree.
 
-`path` and `delete` discover working-tree repositories exactly three levels below the workspace root:
+## References and Queries
 
-```text
-~/workspaces/*/*/*
-```
+Repository references:
 
-A repository must contain a `.git` directory or file. Local discovery may include non-GitHub.com hosts. Bare repositories and recursive scanning outside the fixed layout are unsupported.
+- `owner/repo` (host from `GH_HOST`, default `github.com`)
+- `host/owner/repo`
+- `https://host/owner/repo[.git]`, including browser URLs such as `/owner/repo/pull/1`
+- `git@host:owner/repo[.git]`, `ssh://git@host[:port]/owner/repo[.git]`
+
+An argument containing `/` or `:` that parses as a reference must match a local identity, or a local path relative to its root, exactly. Other arguments are queries, ranked as follows:
+
+1. exact relative path or identity
+2. exact repository name
+3. repository name prefix
+4. substring of the relative path or identity
+5. subsequence of the relative path
+
+The best-ranked matches win. When several remain, a picker opens in a terminal; otherwise the command fails and lists the candidates.
 
 ## `path`
 
-With a repository reference, `path` prints its existing GitHub.com workspace path or fails if it is not cloned.
+Prints the path of one local repository. Without an argument, it opens a picker of every local repository and needs a terminal.
 
-Without an argument, `path` requires a TTY and opens a searchable selection UI over discovered local repositories. The UI distinguishes repositories owned by the authenticated GitHub user from organization-owned repositories and may display the repository's Git description.
+## `list`
+
+Prints local repositories sorted by relative path: relative paths by default, absolute paths with `--full-path`, or JSON with `--json` (`name`, `path`, `root`, `host`, `owner`, `repo`, `remote`, `worktree`). An optional query filters the list with the ranking above.
 
 ## `clone`
 
-With a repository reference, `clone` returns an existing local repository or runs `gh repo clone` into its GitHub.com workspace path.
+For each reference, prints the path of the local repository. If the repository is already present anywhere in the workspace, its existing path is printed without cloning. Otherwise, `gh repo view` resolves the canonical name, which also handles renames and transfers. The repository is then cloned with `gh repo clone` to its canonical path in the primary root, and the new path is printed. Arguments after `--` go to `git clone`.
 
-With an owner-only argument, `clone` requires a TTY and lists that owner's remote repositories. Without an argument, it starts from the authenticated user's repositories. The selection UI:
+With a single owner name or no argument, a picker lists the owner's (or the authenticated user's) repositories. Cloned repositories are shown but cannot be selected. A leading entry switches to the user or one of their organizations.
 
-- displays repository descriptions
-- disables already-cloned repositories
-- allows switching between the authenticated user and their organizations
-
-Remote repository lists use `gh repo list --limit 1000`. Cloning protocol and authentication are delegated to GitHub CLI.
+A failed clone removes the directories it created. Cloning into a path that exists, or that lies inside another working tree, is refused.
 
 ## `create`
 
-`create` requires a TTY. It:
+Creates a repository on GitHub and in the workspace, then prints its path.
 
-1. selects the authenticated user or one of their organizations
-2. asks for repository name, public/private visibility, and optional description
-3. initializes a local repository on branch `main`
-4. creates an empty initial commit
-5. creates the GitHub repository
-6. adds `origin` using the GitHub CLI protocol preference
-7. pushes `main`
-
-If local initialization or GitHub repository creation fails, the newly created local directory is removed. Failures after remote creation may require manual cleanup.
+- `name` creates under the authenticated user; `owner/name` under that owner.
+- Without an argument, the command asks for owner, name, visibility, and description, and needs a terminal.
+- Visibility comes from the flags. Otherwise the command asks in a terminal and defaults to private without one.
+- Without `--template`: `git init` (respecting `init.defaultBranch`), then an empty `Initial commit`, then `gh repo create --source <path> --remote origin --push`. Any failure removes the local directory.
+- With `--template`: `gh repo create --template`, then `clone`.
 
 ## `delete`
 
-`delete` always requires a TTY because deletion requires confirmation.
+Deletes a local working tree, and the GitHub repository with `--remote`. Prints nothing on stdout.
 
-With a repository reference, it derives the local GitHub.com workspace path. Without an argument, it selects a discovered local repository.
+- A reference that is not cloned fails unless `--remote` is given, in which case only the GitHub repository is deleted.
+- The command reports uncommitted changes, unpushed commits, stashes, and linked worktrees. With `--yes`, or without a terminal, deletion with any of them requires `--force`.
+- Without `--yes`, a terminal is required. Local-only deletion asks for confirmation. Remote deletion asks the user to type `owner/repo`.
+- Remote deletion runs first, so a failure leaves the local copy intact. A missing `delete_repo` scope produces the `gh auth refresh` command that fixes it.
+- A linked worktree is removed and pruned from its main repository. `--remote` is refused for a linked worktree.
+- Empty owner and host directories left behind are removed.
 
-- If a local repository exists, the user chooses whether to delete the GitHub remote; local deletion is included.
-- If no local repository exists, deletion targets the GitHub remote.
-- A final confirmation summarizes remote and local effects.
-- Remote deletion runs before local deletion so a remote failure leaves the local repository intact.
+## `root`
+
+Prints the primary root, or every root with `--all`.
+
+## `migrate`
+
+Plans moves of main working trees whose path differs from their canonical path within the same root. This covers legacy layouts and renamed repositories. Nothing moves without `--apply`. Moves are skipped when the target exists, when the target lies inside another working tree, or when the target lies inside the repository itself. Case-only differences are ignored. After a move, `git worktree repair` reconnects linked worktrees.
+
+## `shell-init`
+
+Prints a function (default `ws`) with completion for bash, zsh, fish, or PowerShell. The shell is detected from `$SHELL` when not given.
+
+- `ws` or `ws <query>`: `cd` to `gh workspace path`
+- `ws clone|create|path …`: `cd` to the last printed path
+- `ws <other subcommand> …`: run it; if the current directory disappeared, `cd` to the root
 
 ## Output Contract
 
-On success, every public repository command prints exactly one absolute repository path to stdout:
-
-- `path`, `clone`, and `create` print an existing path.
-- `delete` prints the repository's former workspace path, which may no longer exist.
-
-Interactive UI, child-process output, progress, and errors go to stderr. Failure and cancellation leave stdout empty.
+- stdout carries only results: paths from `path`, `clone`, `create`, and `root`; lines or JSON from `list`; the script from `shell-init`.
+- Prompts, child-process output, progress, warnings, and errors go to stderr.
+- Failure and cancellation exit non-zero and leave stdout empty.
+- Prompts are used only when stdin and stderr are terminals.
 
 ## Dependencies
 
-Runtime dependencies:
+Runtime: GitHub CLI (`gh`) and Git. Go libraries: Cobra; Huh, Bubble Tea, and Lip Gloss.
 
-- GitHub CLI (`gh`)
-- Git
+## Boundaries
 
-Primary Go dependencies:
-
-- Cobra for commands
-- Huh, Bubble Tea, and Lip Gloss for interactive selection
-
-## Current Boundaries
-
-- no config file or flags
-- no GitHub Enterprise cloning
-- no browser, editor, shell, or lazygit launching
-- no full-screen dashboard
-- no cache
-- no recursive local repository scan
+- no dashboard or full-screen UI
+- no editor or browser launching (compose with `path` instead)
+- no metadata cache; scans read `.git/config` directly
+- no worktree creation yet

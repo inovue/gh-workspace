@@ -1,3 +1,7 @@
+---
+status: superseded by ADR-0017
+---
+
 # Accept GitHub.com repository references
 
 `gh-workspace` will accept explicit repository arguments as either `owner/repo` or supported GitHub.com URL forms, then normalize them to a repository identity before deriving local paths or cloning. This keeps direct commands convenient without accepting ambiguous repo-only shorthands.
